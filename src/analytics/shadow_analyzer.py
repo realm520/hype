@@ -72,7 +72,7 @@ class PnLAttribution:
     alpha_percentage: float  # Alpha 占比 (%)
     cost_percentage: float  # 成本占比 (%)
     num_trades: int
-    win_rate: float  # 胜率 (%)
+    win_rate: float | None  # 胜率 (%)，暂时禁用（需要完整持仓追踪系统）
 
 
 @dataclass
@@ -87,6 +87,7 @@ class ShadowTradingReport:
     system_uptime_pct: float
     ready_for_launch: bool  # 改名：meets_launch_criteria → ready_for_launch
     launch_score: float  # 改名：launch_readiness_score → launch_score  # 0-100
+    criteria_details: dict[str, dict[str, float]]  # 详细的标准检查结果
 
 
 class ShadowAnalyzer:
@@ -132,9 +133,8 @@ class ShadowAnalyzer:
 
         # 数据收集
         self._execution_records: list[ShadowExecutionRecord] = []
-        self._signal_history: deque = deque(
-            maxlen=int(ic_window_hours * 3600)
-        )  # 最多保留 N 小时
+        # 不限制 deque 长度，使用时间窗口过滤（避免早期信号被挤出）
+        self._signal_history: deque = deque()
 
         # 性能指标
         self._peak_nav = initial_nav
@@ -149,6 +149,9 @@ class ShadowAnalyzer:
         
         # NAV 历史（用于计算夏普比率）
         self._nav_history: list[tuple[float, Decimal]] = []  # [(timestamp, nav), ...]
+
+        # 信号 ID 计数器（用于未来收益跟踪）
+        self._next_signal_id = 0
 
         logger.info(
             "shadow_analyzer_initialized",
@@ -195,19 +198,58 @@ class ShadowAnalyzer:
             filled=record.execution_result is not None,
         )
 
-    def record_signal(self, signal: SignalScore, future_return: float | None = None) -> None:
+    def record_signal(self, signal: SignalScore, future_return: float | None = None) -> int:
         """
         记录信号（用于 IC 计算）
 
         Args:
             signal: 信号评分
             future_return: 未来收益（T+n 收益率，用于计算 IC）
+
+        Returns:
+            int: 信号唯一标识（用于后续更新）
         """
+        signal_id = self._next_signal_id
+        self._next_signal_id += 1
+
+        # 将毫秒时间戳转换为秒（与 time.time() 单位统一）
+        timestamp_sec = signal.timestamp / 1000.0
+
         self._signal_history.append({
-            "timestamp": signal.timestamp,
+            "id": signal_id,
+            "timestamp": timestamp_sec,  # 存储秒级时间戳
             "signal_value": signal.value,
             "future_return": future_return,
         })
+
+        return signal_id
+
+    def update_signal_future_return(self, signal_id: int, future_return: float) -> None:
+        """
+        更新信号的未来收益
+
+        由 FutureReturnTracker 在 T+n 时刻调用。
+
+        Args:
+            signal_id: 信号唯一标识
+            future_return: 未来收益率
+        """
+        # 查找并更新信号
+        for signal in self._signal_history:
+            if signal.get("id") == signal_id:
+                signal["future_return"] = future_return
+                logger.debug(
+                    "signal_future_return_updated",
+                    signal_id=signal_id,
+                    future_return=future_return,
+                )
+                return
+
+        # 如果找不到信号，记录警告
+        logger.warning(
+            "signal_not_found_for_update",
+            signal_id=signal_id,
+        )
 
     def calculate_signal_quality(self) -> SignalQualityMetrics:
         """
@@ -216,10 +258,34 @@ class ShadowAnalyzer:
         Returns:
             SignalQualityMetrics: 信号质量指标
         """
-        # 过滤有未来收益的信号
+        # 计算时间窗口（只统计窗口内的信号）
+        cutoff_time = time.time() - (self.ic_window_hours * 3600)
+
+        # 调试日志：显示过滤前的状态
+        logger.info(
+            "signal_quality_calculation_start",
+            total_signals=len(self._signal_history),
+            cutoff_time=cutoff_time,
+            ic_window_hours=self.ic_window_hours,
+            sample_timestamps=[
+                s.get("timestamp") for s in list(self._signal_history)[:3]
+            ] if self._signal_history else [],
+        )
+
+        # 过滤：在时间窗口内 AND 有未来收益
         valid_signals = [
-            s for s in self._signal_history if s.get("future_return") is not None
+            s for s in self._signal_history
+            if s.get("timestamp", 0) >= cutoff_time
+            and s.get("future_return") is not None
         ]
+
+        # 调试日志：显示过滤结果
+        logger.info(
+            "signal_quality_filtered",
+            valid_count=len(valid_signals),
+            with_future_return=sum(1 for s in self._signal_history if s.get("future_return") is not None),
+            in_time_window=sum(1 for s in self._signal_history if s.get("timestamp", 0) >= cutoff_time),
+        )
 
         if len(valid_signals) < 30:
             logger.warning(
@@ -239,6 +305,40 @@ class ShadowAnalyzer:
 
         signals = np.array([s["signal_value"] for s in valid_signals])
         returns = np.array([s["future_return"] for s in valid_signals])
+
+        # ========== 🔍 诊断日志 START ==========
+        # 输出前 20 个样本用于诊断
+        sample_size = min(20, len(valid_signals))
+        logger.info(
+            "ic_diagnosis_samples",
+            sample_count=sample_size,
+            samples=[
+                {
+                    "signal": float(signals[i]),
+                    "return": float(returns[i] * 100),  # 转为百分比
+                    "timestamp": valid_signals[i].get("timestamp"),
+                }
+                for i in range(sample_size)
+            ],
+        )
+
+        # 统计信息
+        logger.info(
+            "ic_diagnosis_stats",
+            signal_mean=float(np.mean(signals)),
+            signal_std=float(np.std(signals)),
+            signal_min=float(np.min(signals)),
+            signal_max=float(np.max(signals)),
+            return_mean_pct=float(np.mean(returns) * 100),
+            return_std_pct=float(np.std(returns) * 100),
+            return_min_pct=float(np.min(returns) * 100),
+            return_max_pct=float(np.max(returns) * 100),
+            positive_signal_count=int(np.sum(signals > 0)),
+            negative_signal_count=int(np.sum(signals < 0)),
+            positive_return_count=int(np.sum(returns > 0)),
+            negative_return_count=int(np.sum(returns < 0)),
+        )
+        # ========== 🔍 诊断日志 END ==========
 
         # 计算 IC (Spearman 相关系数)
         ic, p_value = stats.spearmanr(signals, returns)
@@ -448,7 +548,7 @@ class ShadowAnalyzer:
         fee_total = Decimal("0")
         slippage_total = Decimal("0")
         num_trades = 0
-        wins = 0
+        # wins = 0  # 暂时禁用胜率统计（需要完整持仓追踪系统）
 
         for record in self._execution_records:
             if record.execution_result and not record.skipped:
@@ -463,10 +563,10 @@ class ShadowAnalyzer:
                 # 滑点（负数表示成本）
                 slippage_total -= abs(record.fill_result.slippage) * record.fill_result.filled_size
 
-                # 胜率统计
-                pnl = self._calculate_trade_pnl(record)
-                if pnl > 0:
-                    wins += 1
+                # 胜率统计 - 暂时禁用（当前实现不正确，需要完整持仓追踪）
+                # pnl = self._calculate_trade_pnl(record)
+                # if pnl > 0:
+                #     wins += 1
 
         # Alpha = Total PnL - Fee - Slippage
         # (因为 fee_total 和 slippage_total 已经是负数，所以用减法)
@@ -481,7 +581,8 @@ class ShadowAnalyzer:
             alpha_pct = 0.0
             cost_pct = 0.0
 
-        win_rate = (wins / num_trades * 100) if num_trades > 0 else 0.0
+        # win_rate = (wins / num_trades * 100) if num_trades > 0 else 0.0
+        win_rate = None  # 暂时禁用，需要完整持仓追踪系统
 
         return PnLAttribution(
             total_pnl=total_pnl,
@@ -516,7 +617,7 @@ class ShadowAnalyzer:
         )
 
         # 判断是否满足上线标准
-        meets_criteria = self._check_launch_criteria(
+        meets_criteria, criteria_details = self._check_launch_criteria(
             signal_quality, execution_efficiency, risk_metrics, pnl_attribution, uptime_pct
         )
 
@@ -534,6 +635,7 @@ class ShadowAnalyzer:
             system_uptime_pct=uptime_pct,
             ready_for_launch=meets_criteria,
             launch_score=readiness_score,
+            criteria_details=criteria_details,
         )
 
     def _calculate_trade_pnl(self, record: ShadowExecutionRecord) -> Decimal:
@@ -552,22 +654,48 @@ class ShadowAnalyzer:
         risk_metrics: RiskMetrics,
         pnl_attribution: PnLAttribution,
         uptime_pct: float,
-    ) -> bool:
-        """检查是否满足上线标准"""
-        checks = {
-            "ic": signal_quality.ic >= self.launch_criteria["ic_min"],
-            "alpha_pct": pnl_attribution.alpha_percentage
-            >= self.launch_criteria["alpha_pct_min"],
-            "cost_pct": pnl_attribution.cost_percentage
-            <= self.launch_criteria["cost_pct_max"],
-            "uptime": uptime_pct >= self.launch_criteria["uptime_pct_min"],
-            "latency": execution_efficiency.p99_total_latency_ms
-            <= self.launch_criteria["p99_latency_ms_max"],
+    ) -> tuple[bool, dict[str, dict[str, float]]]:
+        """检查是否满足上线标准，返回详细信息"""
+        criteria_details = {
+            "ic": {
+                "actual": signal_quality.ic,
+                "required": self.launch_criteria["ic_min"],
+                "passed": signal_quality.ic >= self.launch_criteria["ic_min"],
+            },
+            "alpha_pct": {
+                "actual": pnl_attribution.alpha_percentage,
+                "required": self.launch_criteria["alpha_pct_min"],
+                "passed": pnl_attribution.alpha_percentage
+                >= self.launch_criteria["alpha_pct_min"],
+            },
+            "cost_pct": {
+                "actual": pnl_attribution.cost_percentage,
+                "required": self.launch_criteria["cost_pct_max"],
+                "passed": pnl_attribution.cost_percentage
+                <= self.launch_criteria["cost_pct_max"],
+            },
+            "uptime": {
+                "actual": uptime_pct,
+                "required": self.launch_criteria["uptime_pct_min"],
+                "passed": uptime_pct >= self.launch_criteria["uptime_pct_min"],
+            },
+            "latency": {
+                "actual": execution_efficiency.p99_total_latency_ms,
+                "required": self.launch_criteria["p99_latency_ms_max"],
+                "passed": execution_efficiency.p99_total_latency_ms
+                <= self.launch_criteria["p99_latency_ms_max"],
+            },
         }
 
-        logger.info("launch_criteria_check", checks=checks, all_passed=all(checks.values()))
+        all_passed = all(details["passed"] for details in criteria_details.values())
 
-        return all(checks.values())
+        logger.info(
+            "launch_criteria_check",
+            criteria_details=criteria_details,
+            all_passed=all_passed,
+        )
+
+        return all_passed, criteria_details
 
     def _calculate_readiness_score(
         self,
