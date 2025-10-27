@@ -48,16 +48,14 @@ htmlcov/
 .env.*.local
 
 # Data
-data/raw/*.parquet
-data/raw/*.csv
-data/processed/*.parquet
-data/processed/*.csv
-data/shadow_test/  # 影子交易测试数据
+data/
+!data/README.md
+!data/.gitkeep
 
 # Logs
-logs/*.log
-logs/*.txt
-logs/shadow_test/  # 影子交易日志
+logs/
+!logs/.gitkeep
+!logs/README.md
 
 # Documentation
 docs/*.html
