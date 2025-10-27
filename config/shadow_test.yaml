@@ -10,7 +10,7 @@ environment: "mainnet"
 # 影子交易模式
 shadow_mode:
   enabled: true
-  duration_hours: 0.167  # 10 分钟 = 0.167 小时
+  duration_hours: 1.0  # 1 小时完整测试
   start_time: null  # 立即开始
 
   # 成交模拟配置
@@ -22,10 +22,25 @@ shadow_mode:
   # 初始资金
   initial_nav: 100000
 
-  # 订单配置
+  # Week 2 混合订单配置
   orders:
-    default_size: 0.01
-    price_adjustment_bps: 10.0
+    # IOC 订单配置（高置信度）
+    ioc:
+      enabled: true
+      default_size: 0.01
+      price_adjustment_bps: 10.0  # IOC 加价以确保成交
+
+    # 限价单配置（中等置信度）
+    limit:
+      enabled: true
+      default_size: 0.01
+      timeout_seconds: 5.0  # 超时后撤单
+      use_post_only: true  # 确保成为 Maker
+
+    # 订单路由配置
+    routing:
+      enable_fallback: true  # 限价单超时后回退到 IOC
+      fallback_timeout_seconds: 5.0
 
 # 信号配置
 signals:
@@ -34,8 +49,8 @@ signals:
     min_confidence: 0.1
 
   thresholds:
-    theta_1: 0.5  # 高置信度
-    theta_2: 0.2  # 中置信度
+    theta_1: 0.7  # 高置信度（提高到 0.7 减少过度交易）
+    theta_2: 0.4  # 中置信度（提高到 0.4 过滤低质量信号）
 
   # 信号源
   sources:
@@ -53,9 +68,14 @@ signals:
 # 分析配置（测试用更短的窗口）
 analytics:
   ic_calculation:
-    window_hours: 0.5  # 30 分钟窗口（测试用）
-    min_samples: 10  # 降低最小样本数
+    window_hours: 0.5  # 30 分钟 IC 窗口
+    min_samples: 30  # 标准最小样本数
     update_interval_minutes: 2  # 更频繁的更新
+
+  # 未来收益跟踪（用于 IC 计算）
+  future_return:
+    window_minutes: 10  # T+10 分钟收益窗口
+    update_interval_seconds: 10  # 每 10 秒更新一次
 
   pnl_attribution:
     update_interval_minutes: 2
