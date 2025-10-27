@@ -343,6 +343,18 @@ class ShadowAnalyzer:
         # 计算 IC (Spearman 相关系数)
         ic, p_value = stats.spearmanr(signals, returns)
 
+        # 🔧 记录 IC 计算结果
+        logger.info(
+            "ic_calculated",
+            ic=float(ic),
+            p_value=float(p_value),
+            sample_count=len(valid_signals),
+            signal_mean=float(np.mean(signals)),
+            signal_std=float(np.std(signals)),
+            return_mean=float(np.mean(returns)),
+            return_std=float(np.std(returns)),
+        )
+
         # 分层收益（Top 20% vs Bottom 20%)
         sorted_indices = np.argsort(signals)
         quintile_size = max(1, len(signals) // 5)  # 确保至少有 1 个样本
