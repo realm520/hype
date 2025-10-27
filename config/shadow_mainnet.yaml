@@ -1,0 +1,185 @@
+# 影子交易配置（Mainnet 24h 验证）
+# 基于 base.yaml，添加影子交易特有配置
+
+# 继承基础配置
+base_config: "base.yaml"
+
+# 运行环境
+environment: "mainnet"
+
+# 影子交易模式
+shadow_mode:
+  enabled: true
+  duration_hours: 24  # 24 小时验证
+  start_time: null  # null = 立即开始，或指定 ISO 格式时间
+
+  # 成交模拟配置
+  fill_simulation:
+    method: "realistic"  # realistic | optimistic | pessimistic
+    max_slippage_bps: 50.0  # 最大滑点（基点）
+    partial_fill_enabled: true  # 允许部分成交
+
+  # 初始资金（用于 P&L 计算）
+  initial_nav: 100000  # USD
+
+  # 订单配置
+  orders:
+    default_size: 0.01  # BTC 默认订单大小
+    price_adjustment_bps: 10.0  # 价格调整（基点）
+
+# 信号配置（Week 1 IOC-only）
+signals:
+  # 继承 base.yaml 的基础配置
+  aggregation:
+    method: "weighted_average"
+    min_confidence: 0.1
+
+  # 置信度阈值（Week 1: 只执行 HIGH）
+  thresholds:
+    theta_1: 0.5  # 高置信度 → 执行 IOC
+    theta_2: 0.2  # 中置信度 → 跳过（Week 1）
+
+  # 信号源（暂时只启用已实现的）
+  sources:
+    obi:
+      enabled: true
+      weight: 0.4
+      levels: 5
+    microprice:
+      enabled: true
+      weight: 0.3
+    impact:
+      enabled: true
+      weight: 0.3
+
+# 分析配置
+analytics:
+  # IC 计算
+  ic_calculation:
+    window_hours: 1  # 滚动窗口（小时）
+    min_samples: 30  # 最小样本数
+    update_interval_minutes: 5  # 更新间隔
+
+  # PnL 归因
+  pnl_attribution:
+    update_interval_minutes: 5
+    save_to_file: true
+    output_dir: "logs/shadow_trading"
+
+  # 上线标准
+  launch_criteria:
+    ic_min: 0.03  # IC ≥ 0.03
+    alpha_pct_min: 70.0  # Alpha 占比 ≥ 70%
+    cost_pct_max: 25.0  # 成本占比 ≤ 25%
+    uptime_pct_min: 99.9  # 在线率 ≥ 99.9%
+    p99_latency_ms_max: 150.0  # p99 延迟 ≤ 150ms
+    win_rate_min: 60.0  # 胜率 ≥ 60%
+
+# 实时监控配置
+monitoring:
+  live_monitor:
+    enabled: true
+    update_interval_seconds: 60  # 每 60 秒输出一次
+
+    # 告警阈值
+    alert_thresholds:
+      latency_ms: 200  # 延迟超过 200ms 告警
+      fill_rate_pct: 80  # 成交率低于 80% 告警
+      drawdown_pct: 3.0  # 回撤超过 3% 告警
+      consecutive_losses: 5  # 连续亏损 5 次告警
+
+  # 日志配置
+  logging:
+    level: "INFO"
+    format: "json"
+    file_rotation: "daily"
+    output_dir: "logs/shadow_trading"
+
+    # 结构化日志字段
+    include_fields:
+      - "timestamp"
+      - "event"
+      - "symbol"
+      - "signal_value"
+      - "confidence"
+      - "execution_result"
+      - "latency_ms"
+      - "pnl"
+
+# 数据配置
+data:
+  # 订单簿
+  orderbook:
+    levels: 10  # 维护 10 档深度
+    update_frequency: 100  # 毫秒
+
+  # 持久化
+  persistence:
+    enabled: true
+    save_interval_minutes: 10
+    output_dir: "data/shadow_trading"
+    formats:
+      - "parquet"  # 执行记录
+      - "json"  # 配置和状态
+
+# Hyperliquid 连接配置
+hyperliquid:
+  # 使用 mainnet 端点
+  endpoint: "mainnet"
+
+  # WebSocket 配置
+  websocket:
+    reconnect_enabled: true
+    reconnect_max_attempts: 10
+    reconnect_delay_seconds: 5
+    heartbeat_interval_seconds: 30
+
+  # 订阅配置
+  subscriptions:
+    symbols:
+      - "BTC"
+      - "ETH"
+    channels:
+      - "l2Book"  # L2 订单簿
+      - "trades"  # 成交记录
+      - "user"  # 用户信息（只读，不下单）
+
+# 风控配置（影子模式下仍然检查，验证风控逻辑）
+risk:
+  # 硬熔断
+  hard_limits:
+    max_single_loss_pct: 0.008  # 0.8%
+    max_daily_drawdown_pct: 0.05  # 5%
+    max_position_size_usd: 10000
+
+  # 仓位管理
+  position:
+    max_leverage: 5
+    inventory_target: 0
+    inventory_tolerance: 0.2
+
+# 报告配置
+reporting:
+  # 实时报告
+  realtime:
+    enabled: true
+    interval_minutes: 10
+    include_charts: true
+
+  # 最终报告
+  final_report:
+    enabled: true
+    output_dir: "docs/shadow_trading"
+    formats:
+      - "html"
+      - "json"
+      - "markdown"
+
+    # 报告内容
+    sections:
+      - "summary"  # 总结
+      - "signal_quality"  # 信号质量
+      - "execution_efficiency"  # 执行效率
+      - "risk_metrics"  # 风控表现
+      - "pnl_attribution"  # PnL 归因
+      - "launch_readiness"  # 上线准备度评估

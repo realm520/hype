@@ -1,0 +1,130 @@
+# Week 1 IOC-only 配置
+
+# 继承基础配置
+extends: "base.yaml"
+
+# Week 1 特定配置
+
+# 信号配置（Week 1 只用 3 个基础信号）
+signals:
+  enabled:
+    - obi
+    - microprice
+    - impact
+
+  # OBI 信号
+  obi:
+    levels: 5  # 档位数
+    weight: 0.4  # 权重
+
+  # Microprice 信号
+  microprice:
+    weight: 0.3
+
+  # Impact 信号
+  impact:
+    window_ms: 100  # 窗口（毫秒）
+    weight: 0.3
+
+  # 置信度阈值（Week 1）
+  thresholds:
+    theta_1: 0.5  # 高置信度：立即 IOC
+    theta_2: 0.2  # 低于此值：不交易
+    # 注意：中置信度在 Week 2 才启用
+
+# 执行配置（Week 1：纯 IOC）
+execution:
+  strategy: "ioc_only"  # IOC-only 模式
+
+  ioc:
+    enabled: true
+    price_strategy: "aggressive_limit"  # 贴盘口限价
+    max_retries: 0  # 不重试（IOC 特性）
+
+  # Week 1 禁用被动挂单
+  passive:
+    enabled: false
+
+  # 订单尺寸计算
+  sizing:
+    method: "kelly_fraction"  # kelly_fraction | fixed | volatility_scaled
+    kelly_fraction: 0.01  # 1% 仓位
+    max_size_usd: 5000  # 单笔最大 5000 USD
+
+# 风控配置（Week 1：仅硬熔断）
+risk:
+  # 硬熔断
+  hard_limits:
+    enabled: true
+    max_single_loss_pct: 0.008
+    max_daily_drawdown_pct: 0.05
+    api_health_check_interval: 10.0  # 秒
+
+  # Week 1 禁用动态风控
+  dynamic:
+    enabled: false
+
+# PnL 归因配置
+analytics:
+  pnl_attribution:
+    enabled: true
+    components:
+      - alpha  # 方向性收益
+      - fee  # 手续费
+      - slippage  # 滑点
+      - impact  # 冲击
+      - rebate  # 回扣（Week 1 为 0）
+
+    # 健康标准
+    health_check:
+      min_alpha_pct: 0.70  # Alpha 至少 70%
+      max_cost_pct: 0.25  # 成本最多 25%
+
+# 验证配置
+validation:
+  # 信号验证
+  signals:
+    min_ic: 0.03  # 最小 IC（Spearman）
+    min_spread_bps: 8  # 最小分层收益（bps）
+
+  # 执行验证
+  execution:
+    min_fill_rate: 0.95  # 最小成交率（IOC）
+    max_slippage_deviation: 0.20  # 滑点偏差（20%）
+
+  # PnL 验证
+  pnl:
+    min_sharpe: 1.0  # 最小夏普比率
+    min_win_rate: 0.60  # 最小胜率
+    min_profit_factor: 1.5  # 最小盈亏比
+
+# 监控配置（Week 1 重点）
+monitoring:
+  # 延迟监控
+  latency:
+    enabled: true
+    targets:
+      ws_processing: 5  # WebSocket 处理 < 5ms
+      orderbook_update: 5  # 订单簿更新 < 5ms
+      signal_calculation: 10  # 信号计算 < 10ms
+      order_submission: 50  # 订单提交 < 50ms
+      end_to_end: 100  # 端到端 < 100ms
+
+  # 告警
+  alerts:
+    enabled: true
+    channels:
+      - "log"  # 日志告警（默认）
+      # - "webhook"  # Webhook（可选）
+
+    triggers:
+      - type: "hard_limit"
+        severity: "critical"
+      - type: "api_error"
+        severity: "high"
+      - type: "high_latency"
+        threshold_ms: 150
+        severity: "medium"
+      - type: "low_fill_rate"
+        threshold: 0.90
+        severity: "medium"

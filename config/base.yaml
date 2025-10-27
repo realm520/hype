@@ -1,0 +1,84 @@
+# 基础配置文件
+
+# Hyperliquid 平台配置
+hyperliquid:
+  # API 端点（根据环境自动选择）
+  endpoints:
+    mainnet:
+      rest: "https://api.hyperliquid.xyz"
+      ws: "wss://api.hyperliquid.xyz/ws"
+    testnet:
+      rest: "https://api.hyperliquid-testnet.xyz"
+      ws: "wss://api.hyperliquid-testnet.xyz/ws"
+
+  # 交易对配置
+  symbols:
+    - "BTC"
+    - "ETH"
+
+  # API 限流
+  rate_limits:
+    rest_requests_per_minute: 100
+    ws_max_subscriptions: 50
+
+# 风控配置
+risk:
+  # 硬熔断（立即停机）
+  hard_limits:
+    max_single_loss_pct: 0.008  # 0.8% 净值
+    max_daily_drawdown_pct: 0.05  # 5%
+    max_position_size_usd: 10000
+
+  # 仓位管理
+  position:
+    max_leverage: 5
+    inventory_target: 0  # 目标库存（0 = 中性）
+    inventory_tolerance: 0.2  # 库存容忍度
+
+# 信号配置
+signals:
+  # 信号聚合
+  aggregation:
+    method: "weighted_average"  # weighted_average | majority_vote
+    min_confidence: 0.1  # 最小置信度阈值
+
+  # 置信度阈值
+  thresholds:
+    theta_1: 0.5  # 高置信度
+    theta_2: 0.2  # 中置信度
+
+# 执行配置
+execution:
+  # 订单超时
+  order_timeout: 1.0  # 秒
+
+  # 滑点控制
+  slippage:
+    max_acceptable_bps: 20  # 最大可接受滑点（20 bps）
+    estimation_window: 100  # 滑点估计窗口（笔）
+
+# 监控配置
+monitoring:
+  # 性能指标
+  metrics:
+    enabled: true
+    port: 9090
+    update_interval: 1.0  # 秒
+
+  # 日志
+  logging:
+    level: "INFO"
+    format: "json"
+    file_rotation: "daily"
+
+# 数据配置
+data:
+  # 订单簿
+  orderbook:
+    levels: 10  # 维护的档位数
+    update_frequency: 100  # 毫秒
+
+  # 历史数据
+  history:
+    max_trades_window: 1000  # 最大交易历史窗口
+    max_l2_snapshots: 100  # 最大 L2 快照数

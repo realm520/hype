@@ -1,0 +1,546 @@
+"""影子交易 24 小时验证脚本
+
+在 mainnet 真实市场数据上运行影子交易，不实际下单。
+验证 Week 1 IOC 策略是否满足上线标准。
+
+用法：
+    python scripts/run_shadow_trading.py --config config/shadow_mainnet.yaml
+"""
+
+import asyncio
+import signal
+import time
+from pathlib import Path
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from dataclasses import asdict
+import structlog
+import yaml
+import pandas as pd
+
+from src.core.data_feed import MarketDataManager
+from src.core.logging import setup_logging, get_audit_logger
+from src.hyperliquid.websocket_client import HyperliquidWebSocket
+from src.signals.aggregator import create_aggregator_from_config
+from src.execution.fill_simulator import FillSimulator
+from src.execution.shadow_executor import (
+    ShadowIOCExecutor,
+    ShadowExecutionRecord,
+)
+from src.risk.shadow_position_manager import ShadowPositionManager
+from src.analytics.shadow_analyzer import ShadowAnalyzer
+from src.analytics.live_monitor import LiveMonitor
+from src.core.types import MarketData
+
+logger = structlog.get_logger()
+
+
+class ShadowTradingEngine:
+    """影子交易引擎
+
+    架构：
+        数据层 → 信号层 → 影子执行层 → 影子持仓 → 分析层 → 监控层
+
+    主循环：
+        1. 获取真实市场数据（mainnet）
+        2. 计算聚合信号
+        3. 影子执行（模拟 IOC 成交）
+        4. 更新影子持仓
+        5. 实时分析和监控
+        6. 定期保存状态
+    """
+
+    def __init__(self, config_path: str):
+        """
+        初始化影子交易引擎
+
+        Args:
+            config_path: 配置文件路径
+        """
+        # 加载配置
+        with open(config_path, "r") as f:
+            self.config = yaml.safe_load(f)
+
+        self.symbols = self.config["hyperliquid"]["subscriptions"]["symbols"]
+        self.duration_hours = self.config["shadow_mode"]["duration_hours"]
+        self.initial_nav = Decimal(str(self.config["shadow_mode"]["initial_nav"]))
+
+        self._running = False
+        self._start_time: Optional[float] = None
+        self._end_time: Optional[float] = None
+
+        # 执行记录（用于最终分析）
+        self.execution_records: List[ShadowExecutionRecord] = []
+
+        # 状态保存配置
+        self.save_interval = (
+            self.config["data"]["persistence"]["save_interval_minutes"] * 60
+        )
+        self._last_save_time = 0.0
+        self.output_dir = Path(self.config["data"]["persistence"]["output_dir"])
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            "shadow_trading_engine_initializing",
+            symbols=self.symbols,
+            duration_hours=self.duration_hours,
+            initial_nav=float(self.initial_nav),
+        )
+
+        # 1. 数据层（使用真实 mainnet 数据）
+        use_mainnet = self.config["environment"] == "mainnet"
+        self.ws_client = HyperliquidWebSocket(use_mainnet)
+        self.data_manager = MarketDataManager(self.ws_client)
+
+        # 2. 信号层
+        signals_config = {
+            "signals": self.config["signals"]["sources"],
+            "thresholds": self.config["signals"]["thresholds"],
+        }
+        self.signal_aggregator = create_aggregator_from_config(signals_config)
+
+        # 3. 影子执行层
+        max_slippage_bps = self.config["shadow_mode"]["fill_simulation"][
+            "max_slippage_bps"
+        ]
+        self.fill_simulator = FillSimulator(max_slippage_bps=max_slippage_bps)
+
+        default_size = Decimal(
+            str(self.config["shadow_mode"]["orders"]["default_size"])
+        )
+        price_adjustment_bps = self.config["shadow_mode"]["orders"][
+            "price_adjustment_bps"
+        ]
+        self.shadow_executor = ShadowIOCExecutor(
+            fill_simulator=self.fill_simulator,
+            default_size=default_size,
+            price_adjustment_bps=price_adjustment_bps,
+        )
+
+        # 4. 影子持仓管理
+        self.position_manager = ShadowPositionManager()
+
+        # 5. 分析层
+        ic_window_hours = self.config["analytics"]["ic_calculation"]["window_hours"]
+        launch_criteria = self.config["analytics"]["launch_criteria"]
+        self.analyzer = ShadowAnalyzer(
+            position_manager=self.position_manager,
+            initial_nav=self.initial_nav,
+            ic_window_hours=ic_window_hours,
+            launch_criteria=launch_criteria,
+        )
+
+        # 6. 监控层
+        monitor_config = self.config["monitoring"]["live_monitor"]
+        self.monitor = LiveMonitor(
+            analyzer=self.analyzer,
+            update_interval_seconds=monitor_config["update_interval_seconds"],
+            alert_thresholds=monitor_config["alert_thresholds"],
+        )
+
+        logger.info("shadow_trading_engine_initialized")
+
+    async def start(self) -> None:
+        """启动影子交易"""
+        logger.info(
+            "shadow_trading_starting",
+            symbols=self.symbols,
+            duration_hours=self.duration_hours,
+        )
+
+        try:
+            # 启动数据订阅
+            await self.data_manager.start(self.symbols)
+
+            # 等待数据稳定
+            logger.info("waiting_for_initial_data")
+            await asyncio.sleep(5)
+
+            # 设置运行时间
+            self._start_time = time.time()
+            self._end_time = self._start_time + (self.duration_hours * 3600)
+            self._running = True
+
+            logger.info(
+                "shadow_trading_started",
+                start_time=datetime.fromtimestamp(self._start_time).isoformat(),
+                end_time=datetime.fromtimestamp(self._end_time).isoformat(),
+            )
+
+            # 启动主循环
+            await self._main_loop()
+
+        except Exception as e:
+            logger.error("shadow_trading_start_error", error=str(e), exc_info=True)
+            raise
+
+    async def stop(self) -> None:
+        """停止影子交易"""
+        logger.info("shadow_trading_stopping")
+
+        self._running = False
+
+        # 停止数据管理器
+        await self.data_manager.stop()
+
+        # 保存最终状态
+        await self._save_state(final=True)
+
+        # 生成最终报告
+        await self._generate_final_report()
+
+        logger.info("shadow_trading_stopped")
+
+    async def _main_loop(self) -> None:
+        """主事件循环"""
+        logger.info("main_loop_started")
+
+        while self._running:
+            try:
+                # 检查是否超时
+                if time.time() >= self._end_time:
+                    logger.info("duration_completed", duration_hours=self.duration_hours)
+                    break
+
+                # 遍历所有交易对
+                for symbol in self.symbols:
+                    await self._process_symbol(symbol)
+
+                # 实时监控更新
+                await self.monitor.update()
+
+                # 定期保存状态
+                await self._periodic_save()
+
+                # 100ms 循环周期
+                await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.error("main_loop_error", error=str(e), exc_info=True)
+                # 继续运行，但记录错误
+                await asyncio.sleep(1)
+
+        logger.info("main_loop_completed")
+
+    async def _process_symbol(self, symbol: str) -> None:
+        """
+        处理单个交易对（影子模式）
+
+        Args:
+            symbol: 交易对
+        """
+        try:
+            # 1. 获取真实市场数据
+            market_data = self.data_manager.get_market_data(symbol)
+            if not market_data:
+                return
+
+            # 2. 计算聚合信号
+            signal_score = self.signal_aggregator.calculate(market_data)
+
+            # 记录信号到分析器（用于 IC 计算）
+            self.analyzer.record_signal(
+                signal=signal_score,
+                future_return=None,  # TODO: 实现未来收益跟踪
+            )
+
+            # 3. 判断是否执行（与真实 IOC 执行器一致）
+            if not self.shadow_executor.should_execute(signal_score):
+                return
+
+            # 4. 影子执行（模拟 IOC 订单）
+            execution_record = await self.shadow_executor.execute(
+                signal_score, market_data
+            )
+
+            # 保存执行记录
+            self.execution_records.append(execution_record)
+
+            # 5. 更新影子持仓
+            if not execution_record.skipped:
+                self.position_manager.update_from_execution_record(execution_record)
+
+            # 6. 添加到分析器
+            self.analyzer.record_execution(execution_record)
+
+            # 7. 更新价格（用于未实现盈亏计算）
+            prices = {symbol: market_data.mid_price}
+            self.position_manager.update_prices(prices)
+
+        except Exception as e:
+            logger.error(
+                "symbol_processing_error",
+                symbol=symbol,
+                error=str(e),
+                exc_info=True,
+            )
+
+    async def _periodic_save(self) -> None:
+        """定期保存状态"""
+        now = time.time()
+
+        if now - self._last_save_time < self.save_interval:
+            return
+
+        await self._save_state(final=False)
+        self._last_save_time = now
+
+    async def _save_state(self, final: bool = False) -> None:
+        """
+        保存状态
+
+        Args:
+            final: 是否是最终保存
+        """
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            prefix = "final" if final else "checkpoint"
+
+            # 1. 保存执行记录
+            if self.execution_records:
+                records_data = []
+                for record in self.execution_records:
+                    records_data.append({
+                        "order_id": record.order.id,
+                        "symbol": record.order.symbol,
+                        "side": record.order.side.name,
+                        "size": float(record.order.size),
+                        "price": float(record.order.price),
+                        "filled_size": float(record.order.filled_size),
+                        "avg_fill_price": (
+                            float(record.order.avg_fill_price)
+                            if record.order.avg_fill_price
+                            else None
+                        ),
+                        "status": record.order.status.name,
+                        "skipped": record.skipped,
+                        "skip_reason": record.skip_reason,
+                        "signal_timestamp": record.signal_timestamp,
+                        "decision_timestamp": record.decision_timestamp,
+                        "execution_timestamp": record.execution_timestamp,
+                        "total_latency_ms": record.total_latency_ms,
+                        "slippage_bps": (
+                            record.fill_result.slippage_bps
+                            if record.fill_result
+                            else None
+                        ),
+                    })
+
+                df = pd.DataFrame(records_data)
+                output_file = self.output_dir / f"{prefix}_records_{timestamp}.parquet"
+                df.to_parquet(output_file)
+
+                logger.info(
+                    "execution_records_saved",
+                    file=str(output_file),
+                    count=len(records_data),
+                )
+
+            # 2. 保存持仓统计
+            position_stats = self.position_manager.get_statistics()
+            stats_file = self.output_dir / f"{prefix}_position_stats_{timestamp}.json"
+
+            import json
+            with open(stats_file, "w") as f:
+                json.dump(position_stats, f, indent=2)
+
+            logger.info("position_stats_saved", file=str(stats_file))
+
+        except Exception as e:
+            logger.error("save_state_error", error=str(e), exc_info=True)
+
+    async def _generate_final_report(self) -> None:
+        """生成最终报告"""
+        try:
+            logger.info("generating_final_report")
+
+            # 生成报告
+            report = self.analyzer.generate_report()
+
+            # 保存报告
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_dir = Path(self.config["reporting"]["final_report"]["output_dir"])
+            report_dir.mkdir(parents=True, exist_ok=True)
+
+            # JSON 格式
+            import json
+            json_file = report_dir / f"shadow_trading_report_{timestamp}.json"
+            with open(json_file, "w") as f:
+                json.dump(asdict(report), f, indent=2, default=str)
+
+            # Markdown 格式
+            md_file = report_dir / f"shadow_trading_report_{timestamp}.md"
+            with open(md_file, "w") as f:
+                f.write(self._format_report_markdown(report))
+
+            logger.info(
+                "final_report_generated",
+                json_file=str(json_file),
+                md_file=str(md_file),
+                ready_for_launch=report.ready_for_launch,
+                launch_score=report.launch_score,
+            )
+
+            # 输出关键结论
+            print("\n" + "=" * 80)
+            print("影子交易 24 小时验证完成")
+            print("=" * 80)
+            print(f"\n上线准备度评分: {report.launch_score:.1f}/100")
+            print(f"是否满足上线标准: {'✅ 是' if report.ready_for_launch else '❌ 否'}")
+            print(f"\n信号质量 IC: {report.signal_quality.ic:.4f}")
+            print(f"Alpha 占比: {report.pnl_attribution.alpha_percentage:.1f}%")
+            print(f"胜率: {report.pnl_attribution.win_rate:.1f}%")
+            print(f"总盈亏: ${float(report.pnl_attribution.total_pnl):,.2f}")
+            print(f"\n详细报告: {md_file}")
+            print("=" * 80 + "\n")
+
+        except Exception as e:
+            logger.error("generate_final_report_error", error=str(e), exc_info=True)
+
+    def _format_report_markdown(
+        self, report: "ShadowTradingReport"
+    ) -> str:  # noqa: F821
+        """格式化报告为 Markdown"""
+        from src.analytics.shadow_analyzer import ShadowTradingReport
+
+        lines = []
+        lines.append("# 影子交易验证报告\n")
+        lines.append(f"**生成时间**: {datetime.now().isoformat()}\n")
+        lines.append(f"**运行时长**: {report.runtime_hours:.1f} 小时\n")
+        lines.append(
+            f"**上线准备度**: {report.launch_score:.1f}/100 "
+            f"{'✅' if report.ready_for_launch else '❌'}\n"
+        )
+        lines.append("\n---\n")
+
+        # 信号质量
+        lines.append("\n## 1. 信号质量\n")
+        lines.append(f"- **IC**: {report.signal_quality.ic:.4f}\n")
+        lines.append(f"- **IC p-value**: {report.signal_quality.ic_p_value:.4f}\n")
+        lines.append(
+            f"- **Top 20% 收益**: {report.signal_quality.top_quintile_return:.4f}\n"
+        )
+        lines.append(
+            f"- **Bottom 20% 收益**: {report.signal_quality.bottom_quintile_return:.4f}\n"
+        )
+        lines.append(f"- **样本数**: {report.signal_quality.sample_size}\n")
+
+        # 执行效率
+        lines.append("\n## 2. 执行效率\n")
+        lines.append(
+            f"- **平均延迟**: {report.execution_efficiency.avg_total_latency_ms:.1f} ms\n"
+        )
+        lines.append(
+            f"- **P99 延迟**: {report.execution_efficiency.p99_total_latency_ms:.1f} ms\n"
+        )
+        lines.append(
+            f"- **成交率**: {report.execution_efficiency.fill_rate:.1f}%\n"
+        )
+        lines.append(
+            f"- **平均滑点**: {report.execution_efficiency.avg_slippage_bps:.2f} bps\n"
+        )
+
+        # PnL 归因
+        lines.append("\n## 3. PnL 归因\n")
+        lines.append(
+            f"- **总盈亏**: ${float(report.pnl_attribution.total_pnl):,.2f}\n"
+        )
+        lines.append(
+            f"- **Alpha**: ${float(report.pnl_attribution.alpha):,.2f} "
+            f"({report.pnl_attribution.alpha_percentage:.1f}%)\n"
+        )
+        lines.append(
+            f"- **手续费**: ${float(report.pnl_attribution.fee):,.2f}\n"
+        )
+        lines.append(
+            f"- **滑点**: ${float(report.pnl_attribution.slippage):,.2f}\n"
+        )
+        lines.append(f"- **交易次数**: {report.pnl_attribution.num_trades}\n")
+        lines.append(f"- **胜率**: {report.pnl_attribution.win_rate:.1f}%\n")
+
+        # 风控表现
+        lines.append("\n## 4. 风控表现\n")
+        lines.append(
+            f"- **最大回撤**: {report.risk_metrics.max_drawdown_pct:.2f}%\n"
+        )
+        lines.append(
+            f"- **夏普比率**: {report.risk_metrics.sharpe_ratio:.2f}\n"
+        )
+        lines.append(
+            f"- **连续亏损**: {report.risk_metrics.consecutive_losses}\n"
+        )
+        lines.append(f"- **在线率**: {report.uptime_pct:.2f}%\n")
+
+        # 上线建议
+        lines.append("\n## 5. 上线建议\n")
+        if report.ready_for_launch:
+            lines.append("✅ **满足所有上线标准，建议进入真实交易**\n")
+        else:
+            lines.append("❌ **未满足上线标准，需要改进**\n")
+            lines.append("\n需要改进的指标:\n")
+            for criterion, details in report.criteria_details.items():
+                if not details["passed"]:
+                    lines.append(
+                        f"- {criterion}: {details['actual']:.2f} "
+                        f"(要求: {details['required']:.2f})\n"
+                    )
+
+        return "".join(lines)
+
+
+async def main() -> None:
+    """主函数"""
+    import argparse
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="运行影子交易验证")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/shadow_mainnet.yaml",
+        help="配置文件路径",
+    )
+    args = parser.parse_args()
+
+    # 配置日志系统（使用统一的日志配置）
+    setup_logging()
+
+    logger = structlog.get_logger(__name__)
+    audit_logger = get_audit_logger()
+
+    logger.info(
+        "shadow_trading_system_starting",
+        config=args.config,
+    )
+
+    # 记录审计日志（系统启动）
+    audit_logger.info(
+        "shadow_system_started",
+        config=args.config,
+        mode="shadow_trading",
+    )
+
+    # 创建引擎
+    engine = ShadowTradingEngine(args.config)
+
+    # 移除自定义信号处理器（避免无限循环）
+    # asyncio 默认会处理 KeyboardInterrupt
+
+    try:
+        # 启动引擎
+        await engine.start()
+
+    except KeyboardInterrupt:
+        logger.info("keyboard_interrupt_received")
+
+    except Exception as e:
+        logger.error("system_error", error=str(e), exc_info=True)
+
+    finally:
+        await engine.stop()
+        logger.info("system_shutdown_complete")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

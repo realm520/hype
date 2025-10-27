@@ -1,0 +1,127 @@
+# 信号参数配置
+
+# OBI（Order Book Imbalance）信号
+obi:
+  # 基本参数
+  levels: 5  # 计算的档位数
+  weight: 0.4  # 信号权重
+
+  # 验证参数
+  validation:
+    min_ic: 0.03  # 最小 IC（Spearman）
+    min_spread_bps: 8  # 最小分层收益
+    lookforward_ms: 1000  # 前瞻窗口（1 秒）
+
+  # 归一化
+  normalization:
+    method: "tanh"  # tanh | minmax | zscore
+    clip_range: [-0.5, 0.5]
+
+# Microprice 信号
+microprice:
+  # 基本参数
+  weight: 0.3
+
+  # 计算方式
+  calculation:
+    use_volume_weighted: true  # 是否使用成交量加权
+
+  # 验证参数
+  validation:
+    min_ic: 0.03
+    min_spread_bps: 8
+    lookforward_ms: 1000
+
+  # 归一化
+  normalization:
+    method: "zscore"
+    rolling_window: 100  # 滚动窗口（笔）
+
+# Impact（冲击）信号
+impact:
+  # 基本参数
+  window_ms: 100  # 统计窗口（毫秒）
+  weight: 0.3
+
+  # 大单检测
+  large_trade:
+    min_size_usd: 10000  # 大单阈值（USD）
+    decay_factor: 0.95  # 衰减因子
+
+  # 验证参数
+  validation:
+    min_ic: 0.02  # Impact 信号 IC 要求稍低
+    min_spread_bps: 5
+    lookforward_ms: 500  # 前瞻窗口更短
+
+  # 归一化
+  normalization:
+    method: "tanh"
+    clip_range: [-0.3, 0.3]
+
+# 信号聚合
+aggregation:
+  # 聚合方法
+  method: "weighted_average"  # weighted_average | majority_vote | ensemble
+
+  # 置信度计算
+  confidence:
+    method: "absolute_sum"  # absolute_sum | max | weighted_max
+    thresholds:
+      high: 0.5  # 高置信度（theta_1）
+      medium: 0.2  # 中置信度（theta_2）
+
+  # 信号一致性检查
+  consistency:
+    enabled: true
+    min_agreement: 0.5  # 最小一致性（50%）
+
+# 信号验证（回测用）
+validation:
+  # 前瞻性检验
+  forward_looking:
+    windows_ms: [100, 200, 500, 1000, 2000]  # 多个前瞻窗口
+    metrics:
+      - ic  # Information Coefficient
+      - rank_ic  # Rank IC
+      - spread  # 分层收益
+
+  # 稳健性检验
+  robustness:
+    # 跨时段
+    time_periods:
+      - "asia"  # 亚洲时段
+      - "europe"  # 欧洲时段
+      - "us"  # 美国时段
+      - "overnight"  # 隔夜
+
+    # 跨波动率
+    volatility_regimes:
+      - "low"  # 低波动（< 20% 年化）
+      - "medium"  # 中波动（20-50%）
+      - "high"  # 高波动（> 50%）
+
+    # 跨品种
+    symbols:
+      - "BTC"
+      - "ETH"
+
+  # 衰减分析
+  decay:
+    enabled: true
+    max_delay_ms: 200  # 最大延迟（超过此值信号失效）
+    decay_rate: 0.01  # 每 ms 衰减率
+
+# 性能基准
+benchmarks:
+  # 单信号基准
+  individual:
+    min_ic: 0.03
+    min_sharpe: 0.5
+    min_win_rate: 0.55
+
+  # 组合信号基准
+  combined:
+    min_ic: 0.05  # 组合应优于单信号
+    min_sharpe: 1.0
+    min_win_rate: 0.60
