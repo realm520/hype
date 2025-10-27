@@ -4,6 +4,7 @@
 用于影子交易系统，不实际下单。
 """
 
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -246,6 +247,75 @@ class FillSimulator:
             slippage=fill_result.slippage,
             timestamp=timestamp,
         )
+
+    def simulate_limit_fill(
+        self,
+        market_data,  # MarketData type
+        side: OrderSide,
+        size: Decimal,
+        price: Decimal,
+    ) -> "FillSimulationResult":
+        """
+        模拟限价单成交（Maker 费率 -0.02%）
+
+        限价单特点：
+            - 贴盘口价格
+            - 成为 Maker（提供流动性）
+            - 费率 -0.02%（rebate）
+            - 无滑点（价格精确）
+
+        Args:
+            market_data: 市场数据
+            side: 订单方向
+            size: 订单大小
+            price: 限价单价格
+
+        Returns:
+            FillSimulationResult: 成交结果
+        """
+        # 限价单成交：全部成交，无滑点，Maker 费率
+        filled_size = size
+        avg_fill_price = price
+        slippage = Decimal("0")  # 限价单无滑点
+        slippage_bps = 0.0
+        levels_consumed = 1  # 单一价格档位
+        partial_fill = False  # 假设全部成交
+        fill_percentage = 100.0
+        total_cost = filled_size * avg_fill_price
+
+        logger.info(
+            "limit_fill_simulated",
+            symbol=market_data.symbol,
+            side=side.name,
+            filled_size=float(filled_size),
+            price=float(price),
+            fee_bps=-0.2,  # Maker rebate
+        )
+
+        result = FillSimulationResult(
+            filled_size=filled_size,
+            avg_fill_price=avg_fill_price,
+            slippage=slippage,
+            slippage_bps=slippage_bps,
+            levels_consumed=levels_consumed,
+            partial_fill=partial_fill,
+            fill_percentage=fill_percentage,
+            total_cost=total_cost,
+        )
+
+        # 添加 to_execution_result 方法引用
+        def to_execution_result() -> ExecutionResult:
+            return ExecutionResult(
+                order_id="shadow_limit",
+                fill_price=avg_fill_price,
+                fill_size=filled_size,
+                expected_price=price,
+                slippage=slippage,
+                timestamp=int(time.time() * 1000),
+            )
+
+        result.to_execution_result = to_execution_result
+        return result
 
     def __repr__(self) -> str:
         return f"FillSimulator(max_slippage_bps={self.max_slippage_bps})"

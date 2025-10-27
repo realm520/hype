@@ -28,9 +28,14 @@ from src.execution.shadow_executor import (
     ShadowIOCExecutor,
     ShadowExecutionRecord,
 )
+from src.execution.shadow_order_router import (
+    ShadowOrderRouter,
+    ShadowLimitExecutor,
+)
 from src.risk.shadow_position_manager import ShadowPositionManager
 from src.analytics.shadow_analyzer import ShadowAnalyzer
 from src.analytics.live_monitor import LiveMonitor
+from src.analytics.future_return_tracker import FutureReturnTracker
 from src.core.types import MarketData
 
 logger = structlog.get_logger()
@@ -100,23 +105,69 @@ class ShadowTradingEngine:
         }
         self.signal_aggregator = create_aggregator_from_config(signals_config)
 
-        # 3. 影子执行层
+        # 3. 影子执行层（Week 2 混合订单路由）
         max_slippage_bps = self.config["shadow_mode"]["fill_simulation"][
             "max_slippage_bps"
         ]
         self.fill_simulator = FillSimulator(max_slippage_bps=max_slippage_bps)
 
-        default_size = Decimal(
-            str(self.config["shadow_mode"]["orders"]["default_size"])
-        )
-        price_adjustment_bps = self.config["shadow_mode"]["orders"][
-            "price_adjustment_bps"
-        ]
-        self.shadow_executor = ShadowIOCExecutor(
-            fill_simulator=self.fill_simulator,
-            default_size=default_size,
-            price_adjustment_bps=price_adjustment_bps,
-        )
+        # 读取订单配置（兼容 Week 1 格式）
+        orders_config = self.config["shadow_mode"]["orders"]
+
+        # Week 2 新格式：分 IOC 和 limit 配置
+        if "ioc" in orders_config:
+            ioc_config = orders_config["ioc"]
+            limit_config = orders_config["limit"]
+            routing_config = orders_config["routing"]
+
+            # IOC 执行器
+            ioc_default_size = Decimal(str(ioc_config["default_size"]))
+            ioc_price_adjustment_bps = ioc_config["price_adjustment_bps"]
+            ioc_executor = ShadowIOCExecutor(
+                fill_simulator=self.fill_simulator,
+                default_size=ioc_default_size,
+                price_adjustment_bps=ioc_price_adjustment_bps,
+            )
+
+            # 限价单执行器
+            limit_default_size = Decimal(str(limit_config["default_size"]))
+            limit_timeout_seconds = limit_config["timeout_seconds"]
+            limit_use_post_only = limit_config["use_post_only"]
+            limit_executor = ShadowLimitExecutor(
+                fill_simulator=self.fill_simulator,
+                default_size=limit_default_size,
+                timeout_seconds=limit_timeout_seconds,
+                use_post_only=limit_use_post_only,
+            )
+
+            # 订单路由器
+            enable_fallback = routing_config["enable_fallback"]
+            self.shadow_executor = ShadowOrderRouter(
+                fill_simulator=self.fill_simulator,
+                ioc_executor=ioc_executor,
+                limit_executor=limit_executor,
+                enable_fallback=enable_fallback,
+            )
+
+            logger.info(
+                "shadow_order_router_configured",
+                mode="week2_hybrid",
+                enable_fallback=enable_fallback,
+            )
+        else:
+            # Week 1 兼容格式：只有 IOC
+            default_size = Decimal(str(orders_config["default_size"]))
+            price_adjustment_bps = orders_config["price_adjustment_bps"]
+            self.shadow_executor = ShadowIOCExecutor(
+                fill_simulator=self.fill_simulator,
+                default_size=default_size,
+                price_adjustment_bps=price_adjustment_bps,
+            )
+
+            logger.info(
+                "shadow_ioc_executor_configured",
+                mode="week1_ioc_only",
+            )
 
         # 4. 影子持仓管理
         self.position_manager = ShadowPositionManager()
@@ -130,6 +181,19 @@ class ShadowTradingEngine:
             ic_window_hours=ic_window_hours,
             launch_criteria=launch_criteria,
         )
+
+        # 5.5 未来收益跟踪器（用于 IC 计算）
+        future_return_window = self.config["analytics"]["future_return"][
+            "window_minutes"
+        ]
+        self.future_return_tracker = FutureReturnTracker(
+            window_minutes=future_return_window,
+            update_callback=self.analyzer.update_signal_future_return,
+        )
+        self._last_return_update_time = 0.0
+        self._return_update_interval = self.config["analytics"]["future_return"][
+            "update_interval_seconds"
+        ]
 
         # 6. 监控层
         monitor_config = self.config["monitoring"]["live_monitor"]
@@ -210,6 +274,9 @@ class ShadowTradingEngine:
                 # 实时监控更新
                 await self.monitor.update()
 
+                # 定期更新未来收益
+                await self._periodic_return_update()
+
                 # 定期保存状态
                 await self._periodic_save()
 
@@ -240,19 +307,34 @@ class ShadowTradingEngine:
             signal_score = self.signal_aggregator.calculate(market_data)
 
             # 记录信号到分析器（用于 IC 计算）
-            self.analyzer.record_signal(
+            signal_id = self.analyzer.record_signal(
                 signal=signal_score,
-                future_return=None,  # TODO: 实现未来收益跟踪
+                future_return=None,  # 将由 future_return_tracker 异步更新
             )
 
-            # 3. 判断是否执行（与真实 IOC 执行器一致）
-            if not self.shadow_executor.should_execute(signal_score):
-                return
-
-            # 4. 影子执行（模拟 IOC 订单）
-            execution_record = await self.shadow_executor.execute(
-                signal_score, market_data
+            # 记录到未来收益跟踪器（用于 T+n 收益计算）
+            self.future_return_tracker.record_signal(
+                signal_id=signal_id,
+                signal_value=signal_score.value,
+                symbol=symbol,
+                price=market_data.mid_price,
             )
+
+            # 3. 影子执行（Week 2: 自动路由 | Week 1: IOC only）
+            # OrderRouter 会自动根据置信度选择执行策略，无需手动检查
+            if hasattr(self.shadow_executor, "route_and_execute"):
+                # Week 2: 混合订单路由
+                execution_record = await self.shadow_executor.route_and_execute(
+                    signal_score, market_data
+                )
+            else:
+                # Week 1: IOC only（向后兼容）
+                if not self.shadow_executor.should_execute(signal_score):
+                    return
+
+                execution_record = await self.shadow_executor.execute(
+                    signal_score, market_data
+                )
 
             # 保存执行记录
             self.execution_records.append(execution_record)
@@ -275,6 +357,24 @@ class ShadowTradingEngine:
                 error=str(e),
                 exc_info=True,
             )
+
+    async def _periodic_return_update(self) -> None:
+        """定期更新未来收益"""
+        now = time.time()
+
+        if now - self._last_return_update_time < self._return_update_interval:
+            return
+
+        # 获取当前所有交易对的价格
+        current_prices = {}
+        for symbol in self.symbols:
+            market_data = self.data_manager.get_market_data(symbol)
+            if market_data:
+                current_prices[symbol] = market_data.mid_price
+
+        # 批量更新已到期信号的未来收益
+        self.future_return_tracker.update_future_returns(current_prices)
+        self._last_return_update_time = now
 
     async def _periodic_save(self) -> None:
         """定期保存状态"""
@@ -390,7 +490,10 @@ class ShadowTradingEngine:
             print(f"是否满足上线标准: {'✅ 是' if report.ready_for_launch else '❌ 否'}")
             print(f"\n信号质量 IC: {report.signal_quality.ic:.4f}")
             print(f"Alpha 占比: {report.pnl_attribution.alpha_percentage:.1f}%")
-            print(f"胜率: {report.pnl_attribution.win_rate:.1f}%")
+            if report.pnl_attribution.win_rate is not None:
+                print(f"胜率: {report.pnl_attribution.win_rate:.1f}%")
+            else:
+                print(f"胜率: N/A (需要完整持仓追踪)")
             print(f"总盈亏: ${float(report.pnl_attribution.total_pnl):,.2f}")
             print(f"\n详细报告: {md_file}")
             print("=" * 80 + "\n")
@@ -457,7 +560,10 @@ class ShadowTradingEngine:
             f"- **滑点**: ${float(report.pnl_attribution.slippage):,.2f}\n"
         )
         lines.append(f"- **交易次数**: {report.pnl_attribution.num_trades}\n")
-        lines.append(f"- **胜率**: {report.pnl_attribution.win_rate:.1f}%\n")
+        if report.pnl_attribution.win_rate is not None:
+            lines.append(f"- **胜率**: {report.pnl_attribution.win_rate:.1f}%\n")
+        else:
+            lines.append(f"- **胜率**: N/A (需要完整持仓追踪系统)\n")
 
         # 风控表现
         lines.append("\n## 4. 风控表现\n")
@@ -470,7 +576,7 @@ class ShadowTradingEngine:
         lines.append(
             f"- **连续亏损**: {report.risk_metrics.consecutive_losses}\n"
         )
-        lines.append(f"- **在线率**: {report.uptime_pct:.2f}%\n")
+        lines.append(f"- **在线率**: {report.system_uptime_pct:.2f}%\n")
 
         # 上线建议
         lines.append("\n## 5. 上线建议\n")
