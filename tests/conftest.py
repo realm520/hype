@@ -369,3 +369,58 @@ def create_signal():
         )
 
     return _create
+
+
+# ==================== 日志系统隔离 Fixtures ====================
+
+
+@pytest.fixture(scope="function", autouse=False)
+def isolated_logging(tmp_path, monkeypatch):
+    """
+    为每个测试提供隔离的日志系统环境
+
+    使用方法：
+    1. 在需要隔离日志的测试类或函数上添加此 fixture
+    2. 它会自动创建临时日志目录
+    3. 重置全局日志配置
+    4. 测试结束后清理
+    """
+    import logging
+    import structlog
+
+    # 强制关闭所有日志处理器（彻底清理）
+    logging.shutdown()
+
+    # 保存原始日志配置
+    original_handlers = logging.root.handlers[:]
+    original_level = logging.root.level
+
+    # 清除所有现有处理器
+    for handler in logging.root.handlers[:]:
+        handler.close()
+        logging.root.removeHandler(handler)
+
+    # 重置 structlog
+    structlog.reset_defaults()
+
+    # 设置临时日志目录
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    monkeypatch.setenv("LOG_DIR", str(log_dir))
+
+    yield log_dir
+
+    # 清理：强制刷新并关闭所有处理器
+    logging.shutdown()
+    for handler in logging.root.handlers[:]:
+        handler.flush()
+        handler.close()
+        logging.root.removeHandler(handler)
+
+    # 恢复原始配置
+    for handler in original_handlers:
+        logging.root.addHandler(handler)
+    logging.root.setLevel(original_level)
+
+    # 重置 structlog
+    structlog.reset_defaults()

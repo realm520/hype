@@ -44,10 +44,11 @@ class TestLoggingSetup:
         assert any("trading.log" in name for name in file_names)
         assert any("audit.log" in name for name in file_names)
 
-    def test_log_level_from_env(self, tmp_path, monkeypatch):
+    def test_log_level_from_env(self, tmp_path, monkeypatch, isolated_logging):
         """测试从环境变量读取日志级别"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志目录
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("LOG_DIR", str(log_dir))
 
         setup_logging(log_dir=str(log_dir), enable_audit=False)
 
@@ -55,9 +56,9 @@ class TestLoggingSetup:
         root_logger = logging.getLogger()
         assert root_logger.level == logging.DEBUG
 
-    def test_retention_days_configuration(self, tmp_path):
+    def test_retention_days_configuration(self, tmp_path, isolated_logging):
         """测试日志保留天数配置"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志目录
         retention_days = 10
 
         setup_logging(
@@ -82,7 +83,10 @@ class TestLogging:
         logger = get_logger(__name__)
         logger.info("test_event", param1="value1", param2=123)
 
-        time.sleep(0.1)
+        # 强制刷新所有处理器
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        time.sleep(0.3)  # 延长等待时间
 
         # 读取日志文件
         log_file = log_dir / "trading.log"
@@ -134,7 +138,10 @@ class TestLogging:
         logger = get_logger(__name__)
         logger.info("json_test", field1="value1", field2=42, field3=True)
 
-        time.sleep(0.1)
+        # 强制刷新所有处理器
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        time.sleep(0.3)  # 延长等待时间
 
         log_file = log_dir / "trading.log"
         with open(log_file) as f:
@@ -231,12 +238,15 @@ class TestAuditLogging:
             assert log_data["side"] == "BUY"
             assert log_data["size"] == 0.1
 
-    def test_disable_audit_logging(self, tmp_path):
+    def test_disable_audit_logging(self, tmp_path, isolated_logging):
         """测试禁用审计日志"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志目录
         setup_logging(log_dir=str(log_dir), enable_audit=False)
 
-        time.sleep(0.1)
+        # 强制刷新所有处理器
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        time.sleep(0.3)
 
         # 审计日志文件不应该创建
         audit_file = log_dir / "audit.log"
@@ -261,10 +271,11 @@ class TestLogRotation:
 class TestEnvironmentVariables:
     """环境变量配置测试"""
 
-    def test_log_level_env_override(self, tmp_path, monkeypatch):
+    def test_log_level_env_override(self, tmp_path, monkeypatch, isolated_logging):
         """测试环境变量覆盖日志级别"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志目录
         monkeypatch.setenv("LOG_LEVEL", "ERROR")
+        monkeypatch.setenv("LOG_DIR", str(log_dir))
 
         setup_logging(log_level="INFO", log_dir=str(log_dir), enable_audit=False)
 
