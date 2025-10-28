@@ -81,7 +81,7 @@ analytics:
   pnl_attribution:
     update_interval_minutes: 5
     save_to_file: true
-    output_dir: "logs/shadow_5h_test"
+    output_dir: "data/tests/shadow/records"
 
   # 上线标准（Week 1 标准）
   launch_criteria:
@@ -108,7 +108,7 @@ monitoring:
     level: "INFO"
     format: "json"
     file_rotation: "daily"
-    output_dir: "logs/shadow_5h_test"
+    output_dir: "logs"
 
     include_fields:
       - "timestamp"
@@ -129,7 +129,7 @@ data:
   persistence:
     enabled: true
     save_interval_minutes: 10  # 每 10 分钟保存一次
-    output_dir: "data/shadow_5h_test"
+    output_dir: "data/tests/shadow/records"
     formats:
       - "parquet"
       - "json"
@@ -175,7 +175,7 @@ reporting:
 
   final_report:
     enabled: true
-    output_dir: "docs/shadow_5h_test"
+    output_dir: "data/tests/shadow/reports"
     formats:
       - "html"
       - "json"

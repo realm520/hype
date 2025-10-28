@@ -64,7 +64,7 @@ analytics:
   pnl_attribution:
     update_interval_minutes: 5
     save_to_file: true
-    output_dir: "logs/shadow_trading"
+    output_dir: "data/tests/shadow/records"
 
   # 上线标准
   launch_criteria:
@@ -93,7 +93,7 @@ monitoring:
     level: "INFO"
     format: "json"
     file_rotation: "daily"
-    output_dir: "logs/shadow_trading"
+    output_dir: "logs"
 
     # 结构化日志字段
     include_fields:
@@ -117,7 +117,7 @@ data:
   persistence:
     enabled: true
     save_interval_minutes: 10
-    output_dir: "data/shadow_trading"
+    output_dir: "data/tests/shadow/records"
     formats:
       - "parquet"  # 执行记录
       - "json"  # 配置和状态
@@ -169,7 +169,7 @@ reporting:
   # 最终报告
   final_report:
     enabled: true
-    output_dir: "docs/shadow_trading"
+    output_dir: "data/tests/shadow/reports"
     formats:
       - "html"
       - "json"

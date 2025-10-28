@@ -72,7 +72,7 @@ analytics:
   pnl_attribution:
     update_interval_minutes: 2
     save_to_file: true
-    output_dir: "logs/verification_test"
+    output_dir: "data/tests/shadow/records"
 
   launch_criteria:
     ic_min: 0.03
@@ -98,7 +98,7 @@ monitoring:
     level: "INFO"
     format: "json"
     file_rotation: "daily"
-    output_dir: "logs/verification_test"
+    output_dir: "logs"
 
     include_fields:
       - "timestamp"
@@ -119,7 +119,7 @@ data:
   persistence:
     enabled: true
     save_interval_minutes: 5
-    output_dir: "data/verification_test"
+    output_dir: "data/tests/shadow/records"
     formats:
       - "parquet"
       - "json"
@@ -165,7 +165,7 @@ reporting:
 
   final_report:
     enabled: true
-    output_dir: "docs/verification_test"
+    output_dir: "data/tests/shadow/reports"
     formats:
       - "html"
       - "json"
