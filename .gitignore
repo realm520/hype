@@ -63,6 +63,16 @@ docs/shadow_test/  # 影子交易报告
 !docs/strategy_review.md
 !docs/architecture_design.md
 
+# 影子交易测试报告
+docs/verification_test/*.json
+docs/verification_test/*.md
+docs/shadow_5h_test/*.json
+docs/shadow_5h_test/*.md
+
+# 临时分析报告
+docs/ic_robustness_report.txt
+docs/5h_test_guide.md
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
