@@ -24,18 +24,12 @@ def mock_info(mocker):
 
 @pytest.fixture
 def ws_client_mainnet(mock_info, mocker):
-    """Mainnet WebSocket 客户端实例"""
+    """WebSocket 客户端实例（固定 mainnet）"""
     with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info):
-        client = HyperliquidWebSocket(use_mainnet=True)
+        client = HyperliquidWebSocket()
         return client
 
 
-@pytest.fixture
-def ws_client_testnet(mock_info, mocker):
-    """Testnet WebSocket 客户端实例"""
-    with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info):
-        client = HyperliquidWebSocket(use_mainnet=False)
-        return client
 
 
 @pytest.fixture
@@ -82,34 +76,19 @@ class TestWebSocketBasics:
     """测试 WebSocket 基础功能"""
 
     def test_initialization_mainnet(self, mock_info, mocker):
-        """测试 mainnet 初始化"""
+        """测试初始化（固定 mainnet）"""
         with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info) as mock_info_cls:
-            client = HyperliquidWebSocket(use_mainnet=True)
+            client = HyperliquidWebSocket()
 
-            assert client.use_mainnet is True
             assert client.info is mock_info
             assert client._connected is False
             assert client._subscriptions == {}
 
-            # 验证使用了正确的 API URL
+            # 验证使用了正确的 API URL（固定 mainnet）
             mock_info_cls.assert_called_once_with(
                 base_url=constants.MAINNET_API_URL, skip_ws=False
             )
 
-    def test_initialization_testnet(self, mock_info, mocker):
-        """测试 testnet 初始化"""
-        with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info) as mock_info_cls:
-            client = HyperliquidWebSocket(use_mainnet=False)
-
-            assert client.use_mainnet is False
-            assert client.info is mock_info
-            assert client._connected is False
-            assert client._subscriptions == {}
-
-            # 验证使用了正确的 API URL
-            mock_info_cls.assert_called_once_with(
-                base_url=constants.TESTNET_API_URL, skip_ws=False
-            )
 
     @pytest.mark.asyncio
     async def test_connect(self, ws_client_mainnet):
@@ -453,43 +432,21 @@ class TestWebSocketFactory:
             with patch.dict(os.environ, {"ENVIRONMENT": "mainnet"}):
                 client = create_websocket_from_env()
 
-                assert client.use_mainnet is True
+                # 验证客户端创建成功（固定使用 mainnet）
+                assert client is not None
 
-    def test_create_from_env_testnet(self, mocker):
-        """测试从环境变量创建 testnet 客户端"""
-        mock_info = mocker.MagicMock()
-
-        with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info):
-            with patch.dict(os.environ, {"ENVIRONMENT": "testnet"}):
-                client = create_websocket_from_env()
-
-                assert client.use_mainnet is False
 
     def test_create_from_env_default(self, mocker):
-        """测试从环境变量创建客户端（默认值）"""
+        """测试从环境变量创建客户端（固定 mainnet）"""
         mock_info = mocker.MagicMock()
 
         with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info):
             with patch.dict(os.environ, {}, clear=True):
                 client = create_websocket_from_env()
 
-                # 默认使用 mainnet
-                assert client.use_mainnet is True
+                # 验证客户端创建成功（固定使用 mainnet）
+                assert client is not None
 
-    def test_create_from_env_case_insensitive(self, mocker):
-        """测试环境变量大小写不敏感"""
-        mock_info = mocker.MagicMock()
-
-        with patch("src.hyperliquid.websocket_client.Info", return_value=mock_info):
-            # 测试大写
-            with patch.dict(os.environ, {"ENVIRONMENT": "TESTNET"}):
-                client = create_websocket_from_env()
-                assert client.use_mainnet is False
-
-            # 测试混合大小写
-            with patch.dict(os.environ, {"ENVIRONMENT": "TestNet"}):
-                client = create_websocket_from_env()
-                assert client.use_mainnet is False
 
 
 # ==================== 集成测试 ====================

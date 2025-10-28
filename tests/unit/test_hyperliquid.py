@@ -28,44 +28,29 @@ class TestHyperliquidAPIClient:
 
     @pytest.fixture
     def api_client(self, mocker, mock_exchange):
-        """API 客户端实例"""
+        """API 客户端实例（固定 mainnet）"""
         with patch('src.hyperliquid.api_client.HyperliquidExchange', return_value=mock_exchange):
             client = HyperliquidAPIClient(
                 wallet_address="0x1234567890abcdef",
                 private_key="test_private_key",
-                use_mainnet=True,
             )
             client.exchange = mock_exchange
             return client
 
     def test_initialization_mainnet(self, mocker):
-        """测试初始化（mainnet）"""
+        """测试初始化（固定 mainnet）"""
         mock_exchange = mocker.MagicMock()
 
         with patch('src.hyperliquid.api_client.HyperliquidExchange', return_value=mock_exchange) as mock_cls:
             client = HyperliquidAPIClient(
                 wallet_address="0xtest",
                 private_key="key",
-                use_mainnet=True,
             )
 
             assert client.wallet_address == "0xtest"
-            assert client.use_mainnet is True
             assert client.order_count == 0
             mock_cls.assert_called_once()
 
-    def test_initialization_testnet(self, mocker):
-        """测试初始化（testnet）"""
-        mock_exchange = mocker.MagicMock()
-
-        with patch('src.hyperliquid.api_client.HyperliquidExchange', return_value=mock_exchange):
-            client = HyperliquidAPIClient(
-                wallet_address="0xtest",
-                private_key="key",
-                use_mainnet=False,
-            )
-
-            assert client.use_mainnet is False
 
     @pytest.mark.asyncio
     async def test_place_order_ioc_success(self, api_client, mock_exchange):
@@ -282,13 +267,12 @@ class TestHyperliquidAPIClient:
         with patch.dict(os.environ, {
             'HYPERLIQUID_WALLET_ADDRESS': '0xtest_wallet',
             'HYPERLIQUID_PRIVATE_KEY': 'test_private_key',
-            'ENVIRONMENT': 'testnet',
+            'ENVIRONMENT': 'mainnet',
         }):
             with patch('src.hyperliquid.api_client.HyperliquidExchange', return_value=mock_exchange):
                 client = create_api_client_from_env()
 
                 assert client.wallet_address == "0xtest_wallet"
-                assert client.use_mainnet is False
 
     def test_create_api_client_from_env_missing_wallet(self):
         """测试环境变量缺失钱包地址"""
@@ -318,31 +302,22 @@ class TestHyperliquidWebSocket:
 
     @pytest.fixture
     def ws_client(self, mocker, mock_info):
-        """WebSocket 客户端实例"""
+        """WebSocket 客户端实例（固定 mainnet）"""
         with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
-            client = HyperliquidWebSocket(use_mainnet=True)
+            client = HyperliquidWebSocket()
             client.info = mock_info
             return client
 
     def test_initialization_mainnet(self, mocker):
-        """测试初始化（mainnet）"""
+        """测试初始化（固定 mainnet）"""
         mock_info = mocker.MagicMock()
 
         with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
-            client = HyperliquidWebSocket(use_mainnet=True)
+            client = HyperliquidWebSocket()
 
-            assert client.use_mainnet is True
             assert client.connected is False
             assert client.subscription_count == 0
 
-    def test_initialization_testnet(self, mocker):
-        """测试初始化（testnet）"""
-        mock_info = mocker.MagicMock()
-
-        with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
-            client = HyperliquidWebSocket(use_mainnet=False)
-
-            assert client.use_mainnet is False
 
     @pytest.mark.asyncio
     async def test_connect(self, ws_client):
@@ -462,32 +437,24 @@ class TestHyperliquidWebSocket:
         assert ws_client.subscription_count == 2
 
     def test_create_websocket_from_env_mainnet(self, mocker):
-        """测试从环境变量创建 WebSocket（mainnet）"""
+        """测试从环境变量创建 WebSocket（固定 mainnet）"""
         mock_info = mocker.MagicMock()
 
         with patch.dict(os.environ, {'ENVIRONMENT': 'mainnet'}):
             with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
                 client = create_websocket_from_env()
 
-                assert client.use_mainnet is True
+                # 验证客户端创建成功（固定使用 mainnet）
+                assert client is not None
 
-    def test_create_websocket_from_env_testnet(self, mocker):
-        """测试从环境变量创建 WebSocket（testnet）"""
-        mock_info = mocker.MagicMock()
-
-        with patch.dict(os.environ, {'ENVIRONMENT': 'testnet'}):
-            with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
-                client = create_websocket_from_env()
-
-                assert client.use_mainnet is False
 
     def test_create_websocket_from_env_default(self, mocker):
-        """测试从环境变量创建 WebSocket（默认值）"""
+        """测试从环境变量创建 WebSocket（固定 mainnet）"""
         mock_info = mocker.MagicMock()
 
         with patch.dict(os.environ, {}, clear=True):
             with patch('src.hyperliquid.websocket_client.Info', return_value=mock_info):
                 client = create_websocket_from_env()
 
-                # 默认是 mainnet
-                assert client.use_mainnet is True
+                # 验证客户端创建成功（固定使用 mainnet）
+                assert client is not None

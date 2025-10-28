@@ -93,7 +93,7 @@ def check_config(config_path: str) -> bool:
         logger.info(
             "configuration_valid",
             symbols=config.hyperliquid.symbols,
-            use_mainnet=config.hyperliquid.use_mainnet,
+            network="mainnet",
             initial_nav=float(config.initial_nav),
         )
 
@@ -119,7 +119,7 @@ async def run_trading_system(config_path: str):
     logger.info(
         "starting_trading_engine",
         symbols=config.hyperliquid.symbols,
-        network="mainnet" if config.hyperliquid.use_mainnet else "testnet",
+        network="mainnet",
         initial_nav=float(config.initial_nav),
     )
 

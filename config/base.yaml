@@ -1,15 +1,12 @@
 # 基础配置文件
 
-# Hyperliquid 平台配置
+# Hyperliquid 平台配置（仅 mainnet）
 hyperliquid:
-  # API 端点（根据环境自动选择）
+  # API 端点
   endpoints:
     mainnet:
       rest: "https://api.hyperliquid.xyz"
       ws: "wss://api.hyperliquid.xyz/ws"
-    testnet:
-      rest: "https://api.hyperliquid-testnet.xyz"
-      ws: "wss://api.hyperliquid-testnet.xyz/ws"
 
   # 交易对配置
   symbols:

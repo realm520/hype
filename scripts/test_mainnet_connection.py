@@ -1,6 +1,6 @@
-"""Mainnet 连接测试脚本
+"""Hyperliquid 连接测试脚本
 
-测试与 Hyperliquid mainnet 的连接，验证数据接收质量。
+测试与 Hyperliquid 的连接（固定 mainnet），验证数据接收质量。
 在运行影子交易前执行，确保连接正常。
 
 用法：
@@ -22,17 +22,15 @@ logger = structlog.get_logger()
 
 
 class ConnectionTester:
-    """连接测试器"""
+    """连接测试器（固定 mainnet）"""
 
-    def __init__(self, use_mainnet: bool = True, test_duration: int = 30):
+    def __init__(self, test_duration: int = 30):
         """
         初始化连接测试器
 
         Args:
-            use_mainnet: 是否使用 mainnet（默认 True）
             test_duration: 测试持续时间（秒）
         """
-        self.use_mainnet = use_mainnet
         self.test_duration = test_duration
         self.symbols = ["BTC", "ETH"]
 
@@ -49,7 +47,7 @@ class ConnectionTester:
 
         logger.info(
             "connection_tester_initialized",
-            use_mainnet=use_mainnet,
+            network="mainnet",
             test_duration=test_duration,
         )
 
@@ -62,8 +60,8 @@ class ConnectionTester:
         """
         logger.info("connection_test_starting")
 
-        # 创建 WebSocket 客户端
-        ws_client = HyperliquidWebSocket(self.use_mainnet)
+        # 创建 WebSocket 客户端（固定 mainnet）
+        ws_client = HyperliquidWebSocket()
         data_manager = MarketDataManager(ws_client)
 
         try:
@@ -244,7 +242,7 @@ class ConnectionTester:
 def print_test_report(result: dict[str, any]) -> None:
     """打印测试报告"""
     print("\n" + "=" * 80)
-    print("Mainnet 连接测试报告")
+    print("Hyperliquid 连接测试报告（Mainnet）")
     print("=" * 80)
 
     if result["success"]:
@@ -287,17 +285,12 @@ def print_test_report(result: dict[str, any]) -> None:
 
 async def main() -> None:
     """主函数"""
-    parser = argparse.ArgumentParser(description="测试 Mainnet 连接")
+    parser = argparse.ArgumentParser(description="测试 Hyperliquid 连接（Mainnet）")
     parser.add_argument(
         "--duration",
         type=int,
         default=30,
         help="测试持续时间（秒，默认 30）",
-    )
-    parser.add_argument(
-        "--testnet",
-        action="store_true",
-        help="使用 testnet 而不是 mainnet",
     )
     args = parser.parse_args()
 
@@ -317,12 +310,11 @@ async def main() -> None:
     logger.info(
         "connection_test_starting",
         duration=args.duration,
-        use_mainnet=not args.testnet,
+        network="mainnet",
     )
 
-    # 创建测试器
+    # 创建测试器（固定 mainnet）
     tester = ConnectionTester(
-        use_mainnet=not args.testnet,
         test_duration=args.duration,
     )
 
