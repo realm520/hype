@@ -1,8 +1,10 @@
 """风控层单元测试"""
 
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 from src.core.types import OrderSide
+from src.execution.slippage_estimator import SlippageEstimator
 from src.risk.hard_limits import HardLimits
 from src.risk.position_manager import PositionManager
 
@@ -53,6 +55,97 @@ class TestHardLimits:
         )
         assert not is_allowed
         assert "single loss" in reason.lower()
+
+    def test_slippage_estimator_integration(self, sample_buy_order, sample_market_data):
+        """测试 SlippageEstimator 集成"""
+        # 创建 mock SlippageEstimator
+        mock_estimator = MagicMock(spec=SlippageEstimator)
+        mock_estimator.estimate.return_value = {
+            "estimated_price": Decimal("1500.5"),
+            "slippage_bps": 5.0,  # 5 bps = 0.05%
+            "is_acceptable": True,
+            "levels_consumed": 1,
+        }
+
+        limits = HardLimits(
+            initial_nav=Decimal("100000.0"),
+            max_single_loss_pct=0.008,  # 0.8% = 800 USD
+            max_daily_drawdown_pct=0.05,
+            max_position_size_usd=10000.0,
+            slippage_estimator=mock_estimator,
+        )
+
+        # 测试带 market_data 的调用
+        is_allowed, reason = limits.check_order(
+            sample_buy_order,
+            sample_market_data.mid_price,
+            Decimal("0.0"),
+            market_data=sample_market_data,
+        )
+
+        # 验证调用了 SlippageEstimator
+        mock_estimator.estimate.assert_called_once_with(
+            market_data=sample_market_data,
+            side=sample_buy_order.side,
+            size=sample_buy_order.size,
+        )
+
+        # 应该允许（5 bps 滑点很小）
+        assert is_allowed
+        assert reason is None
+
+    def test_slippage_estimator_fallback(self, sample_buy_order, sample_market_data):
+        """测试 SlippageEstimator 降级机制"""
+        # 创建会抛出异常的 mock
+        mock_estimator = MagicMock(spec=SlippageEstimator)
+        mock_estimator.estimate.side_effect = Exception("Estimator error")
+
+        limits = HardLimits(
+            initial_nav=Decimal("100000.0"),
+            max_single_loss_pct=0.008,
+            max_daily_drawdown_pct=0.05,
+            max_position_size_usd=10000.0,
+            slippage_estimator=mock_estimator,
+        )
+
+        # 即使 estimator 失败，应该降级到固定滑点（1%）
+        is_allowed, reason = limits.check_order(
+            sample_buy_order,
+            sample_market_data.mid_price,
+            Decimal("0.0"),
+            market_data=sample_market_data,
+        )
+
+        # 应该仍然允许（降级使用 1% 固定滑点）
+        assert is_allowed
+        assert reason is None
+
+    def test_slippage_estimator_without_market_data(self, sample_buy_order, sample_market_data):
+        """测试不提供 market_data 时使用固定滑点"""
+        mock_estimator = MagicMock(spec=SlippageEstimator)
+
+        limits = HardLimits(
+            initial_nav=Decimal("100000.0"),
+            max_single_loss_pct=0.008,
+            max_daily_drawdown_pct=0.05,
+            max_position_size_usd=10000.0,
+            slippage_estimator=mock_estimator,
+        )
+
+        # 不提供 market_data
+        is_allowed, reason = limits.check_order(
+            sample_buy_order,
+            sample_market_data.mid_price,
+            Decimal("0.0"),
+            # market_data=None（默认值）
+        )
+
+        # 不应该调用 SlippageEstimator
+        mock_estimator.estimate.assert_not_called()
+
+        # 应该允许（使用固定 1% 滑点）
+        assert is_allowed
+        assert reason is None
 
     def test_position_size_limit(self, sample_buy_order, sample_market_data):
         """测试持仓规模限制"""

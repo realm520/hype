@@ -9,7 +9,8 @@ from decimal import Decimal
 import structlog
 
 from src.core.logging import get_audit_logger
-from src.core.types import Order, OrderSide
+from src.core.types import MarketData, Order, OrderSide
+from src.execution.slippage_estimator import SlippageEstimator
 
 logger = structlog.get_logger()
 audit_logger = get_audit_logger()
@@ -37,6 +38,7 @@ class HardLimits:
         max_single_loss_pct: float = 0.008,
         max_daily_drawdown_pct: float = 0.05,
         max_position_size_usd: Decimal = Decimal("10000"),
+        slippage_estimator: SlippageEstimator | None = None,
     ):
         """
         初始化硬限制风控
@@ -46,15 +48,18 @@ class HardLimits:
             max_single_loss_pct: 单笔最大亏损比例（默认 0.8%，相对初始净值）
             max_daily_drawdown_pct: 日最大回撤比例（默认 5%，相对初始净值）
             max_position_size_usd: 最大持仓（USD，默认 10000）
+            slippage_estimator: 滑点估算器（可选，用于动态估算订单风险）
 
         注意：
             - 所有百分比参数为小数形式（0.008 表示 0.8%）
             - 回撤基准为初始净值，不随日内盈亏变化
+            - 如果提供 slippage_estimator，将使用动态滑点估算提升风控精度
         """
         self.initial_nav = initial_nav
         self.max_single_loss_pct = max_single_loss_pct
         self.max_daily_drawdown_pct = max_daily_drawdown_pct
         self.max_position_size_usd = max_position_size_usd
+        self.slippage_estimator = slippage_estimator
 
         # 当前净值
         self._current_nav = initial_nav
@@ -81,6 +86,7 @@ class HardLimits:
         order: Order,
         current_price: Decimal,
         current_position_size_usd: Decimal = Decimal("0"),
+        market_data: MarketData | None = None,
     ) -> tuple[bool, str | None]:
         """
         检查订单是否违反硬限制
@@ -89,6 +95,7 @@ class HardLimits:
             order: 待检查订单
             current_price: 当前价格
             current_position_size_usd: 当前持仓（USD）
+            market_data: 市场数据（可选，用于动态滑点估算）
 
         Returns:
             tuple[bool, Optional[str]]: (是否允许, 拒绝原因)
@@ -101,7 +108,7 @@ class HardLimits:
         self._check_new_day()
 
         # 1. 检查单笔最大亏损
-        single_loss_check = self._check_single_loss(order, current_price)
+        single_loss_check = self._check_single_loss(order, current_price, market_data)
         if not single_loss_check[0]:
             return single_loss_check
 
@@ -121,7 +128,7 @@ class HardLimits:
         return True, None
 
     def _check_single_loss(
-        self, order: Order, current_price: Decimal
+        self, order: Order, current_price: Decimal, market_data: MarketData | None = None
     ) -> tuple[bool, str | None]:
         """
         检查单笔最大亏损限制
@@ -129,14 +136,16 @@ class HardLimits:
         Args:
             order: 订单
             current_price: 当前价格
+            market_data: 市场数据（可选，用于动态滑点估算）
 
         Returns:
             tuple[bool, Optional[str]]: (是否允许, 拒绝原因)
 
         说明：
             - 最大亏损基准：初始净值（不是当前净值）
-            - 潜在亏损估算：订单价值 * 保守滑点系数（1%）
-            - 建议：集成真实滑点估算器可提高精度
+            - 潜在亏损估算：订单价值 * 滑点系数
+            - 如果提供 slippage_estimator 和 market_data，使用动态估算
+            - 否则使用保守固定值（1% 滑点）
         """
         # 计算订单价值
         order_value = order.size * current_price
@@ -144,10 +153,37 @@ class HardLimits:
         # 计算最大允许亏损（基于初始净值）
         max_loss = self.initial_nav * Decimal(str(self.max_single_loss_pct))
 
-        # IOC 订单的潜在亏损估算
-        # 保守估计：假设最大 1% 滑点
-        # TODO: 集成 SlippageEstimator 可提高估算精度
-        potential_loss = order_value * Decimal("0.01")
+        # 估算潜在亏损
+        if self.slippage_estimator and market_data:
+            # 使用动态滑点估算
+            try:
+                slippage_result = self.slippage_estimator.estimate(
+                    market_data=market_data,
+                    side=order.side,
+                    size=order.size,
+                )
+                # 滑点以基点表示，转换为比例（bps / 10000）
+                slippage_pct = Decimal(str(slippage_result["slippage_bps"])) / Decimal("10000")
+                potential_loss = order_value * slippage_pct
+
+                logger.debug(
+                    "dynamic_slippage_estimate",
+                    order_id=order.id,
+                    slippage_bps=slippage_result["slippage_bps"],
+                    slippage_pct=float(slippage_pct),
+                    potential_loss=float(potential_loss),
+                )
+            except Exception as e:
+                # 降级到固定滑点
+                logger.warning(
+                    "slippage_estimator_error",
+                    error=str(e),
+                    fallback_to_fixed="1%",
+                )
+                potential_loss = order_value * Decimal("0.01")
+        else:
+            # 使用固定滑点（保守估计 1%）
+            potential_loss = order_value * Decimal("0.01")
 
         if potential_loss > max_loss:
             reason = (
