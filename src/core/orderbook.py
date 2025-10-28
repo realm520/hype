@@ -35,7 +35,9 @@ class OrderBook:
 
         logger.info("orderbook_initialized", symbol=symbol, levels=levels)
 
-    def update(self, l2_data: dict[str, Any]) -> None:
+    def update(
+        self, l2_data: dict[str, Any], timestamp_override: int | None = None
+    ) -> None:
         """
         更新订单簿（处理 WebSocket L2 推送）
 
@@ -51,6 +53,7 @@ class OrderBook:
 
         Args:
             l2_data: L2 订单簿数据
+            timestamp_override: 可选的时间戳覆盖（用于测试，生产环境应传 None）
         """
         start_time = time.time()
 
@@ -76,9 +79,14 @@ class OrderBook:
                 for level in asks_data[: self.levels]
             ]
 
-            # 始终使用实时时间戳，确保延迟测量的准确性
+            # 使用注入的时间戳（测试时）或实时时间戳（生产环境）
+            # 实时时间戳确保延迟测量的准确性
             # Hyperliquid 的 "time" 字段可能是服务器时间，与本地执行延迟测量不一致
-            self._last_update_time = int(time.time() * 1000)
+            self._last_update_time = (
+                timestamp_override
+                if timestamp_override is not None
+                else int(time.time() * 1000)
+            )
             self._update_count += 1
 
             # 监控延迟

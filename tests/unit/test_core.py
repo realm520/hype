@@ -312,21 +312,25 @@ class TestMarketDataManager:
 
         callback = data_manager._create_l2_callback("ETH")
 
-        # 模拟 L2 数据
-        l2_data = {
-            "coin": "ETH",
-            "levels": [
-                [{"px": "3000.0", "sz": "10.0", "n": 1}],
-                [{"px": "3001.0", "sz": "12.0", "n": 1}],
-            ],
-            "time": 1700000000000,
+        # 模拟 WebSocket 消息格式：{data: {...}}
+        ws_message = {
+            "data": {
+                "coin": "ETH",
+                "levels": [
+                    [{"px": "3000.0", "sz": "10.0", "n": 1}],
+                    [{"px": "3001.0", "sz": "12.0", "n": 1}],
+                ],
+                "time": 1700000000000,
+            }
         }
 
         # 调用回调
-        callback(l2_data)
+        callback(ws_message)
 
         # 验证订单簿已更新
         assert data_manager._orderbooks["ETH"].update_count == 1
+        # 验证时间戳使用了 L2 数据中的 time 字段
+        assert data_manager._orderbooks["ETH"].last_update_time == 1700000000000
 
     def test_create_trades_callback(self, data_manager):
         """测试创建成交回调函数"""
@@ -335,42 +339,43 @@ class TestMarketDataManager:
 
         callback = data_manager._create_trades_callback("ETH")
 
-        # 模拟成交数据
-        trades_data = {
-            "coin": "ETH",
-            "time": 1700000000000,
-            "trades": [
+        # 模拟 WebSocket 成交数据（格式：{data: [...]}）
+        ws_message = {
+            "data": [
                 {"px": "3000.5", "sz": "1.5", "side": "B", "time": 1700000000001},
                 {"px": "3000.6", "sz": "2.0", "side": "A", "time": 1700000000002},
-            ],
+            ]
         }
 
         # 调用回调
-        callback(trades_data)
+        callback(ws_message)
 
         # 验证成交已记录
         assert len(data_manager._trades["ETH"]) == 2
-        assert data_manager._trades["ETH"][0].price == "3000.5"
+        assert data_manager._trades["ETH"][0].price == Decimal("3000.5")
         assert data_manager._trades["ETH"][0].side == OrderSide.BUY
         assert data_manager._trades["ETH"][1].side == OrderSide.SELL
 
     def test_get_market_data_success(self, data_manager):
         """测试成功获取市场数据"""
-        # 设置订单簿
+        # 设置订单簿（使用固定时间戳）
         orderbook = OrderBook("ETH", levels=10)
-        orderbook.update({
-            "coin": "ETH",
-            "levels": [
-                [{"px": "3000.0", "sz": "10.0", "n": 1}],
-                [{"px": "3001.0", "sz": "12.0", "n": 1}],
-            ],
-            "time": 1700000000000,
-        })
+        orderbook.update(
+            {
+                "coin": "ETH",
+                "levels": [
+                    [{"px": "3000.0", "sz": "10.0", "n": 1}],
+                    [{"px": "3001.0", "sz": "12.0", "n": 1}],
+                ],
+                "time": 1700000000000,
+            },
+            timestamp_override=1700000000000,  # 显式传递固定时间戳
+        )
         data_manager._orderbooks["ETH"] = orderbook
 
         # 设置成交历史
         data_manager._trades["ETH"] = deque([
-            Trade(symbol="ETH", timestamp=1700000000001, price="3000.5", size="1.5", side=OrderSide.BUY)
+            Trade(symbol="ETH", timestamp=1700000000001, price=Decimal("3000.5"), size=Decimal("1.5"), side=OrderSide.BUY)
         ], maxlen=1000)
 
         market_data = data_manager.get_market_data("ETH")

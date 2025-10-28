@@ -3,6 +3,7 @@
 测试信号聚合器的核心功能、边缘情况和配置验证。
 """
 
+import itertools
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -444,7 +445,8 @@ class TestAggregatorPerformance:
         """测试慢计算警告"""
         # Mock time.time 模拟慢计算
         with patch("time.time") as mock_time:
-            mock_time.side_effect = [0.0, 0.006]  # 6ms 计算时间
+            # 使用 itertools.count 创建无限迭代器，每次递增 6ms
+            mock_time.side_effect = itertools.count(0.0, 0.006)
 
             result = single_signal_aggregator.calculate(sample_market_data)
 

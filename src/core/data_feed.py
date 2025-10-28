@@ -79,7 +79,9 @@ class MarketDataManager:
             if symbol in self._orderbooks:
                 # 提取 data 字段（WebSocket 消息格式：{channel, data}）
                 l2_data = data.get("data", {})
-                self._orderbooks[symbol].update(l2_data)
+                # 使用 L2 数据中的时间戳（如果存在）
+                timestamp = l2_data.get("time")
+                self._orderbooks[symbol].update(l2_data, timestamp_override=timestamp)
 
         return callback
 

@@ -116,12 +116,12 @@ class SignalAggregator:
             confidence = self._determine_confidence(aggregated_value)
 
             # 创建 SignalScore 对象
-            # 使用实时时间戳，避免使用可能过时的 market_data.timestamp
+            # 使用 market_data.timestamp，确保信号时间戳与市场数据一致
             signal_score = SignalScore(
                 value=aggregated_value,
                 confidence=confidence,
                 individual_scores=individual_scores,
-                timestamp=int(time.time() * 1000),
+                timestamp=market_data.timestamp,
             )
 
             # 监控性能
