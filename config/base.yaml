@@ -57,6 +57,18 @@ execution:
     max_acceptable_bps: 20  # 最大可接受滑点（20 bps）
     estimation_window: 100  # 滑点估计窗口（笔）
 
+# 费率配置
+fees:
+  # Hyperliquid Level 0 费率（14天成交量 ≤ $5,000,000）
+  taker_rate: 0.00045  # 0.045% = 4.5 bps（IOC 订单）
+  maker_rate: 0.00015  # 0.015% = 1.5 bps（限价单）
+
+  # 费率说明：
+  # 1. Taker（接盘方）：消耗流动性，支付手续费
+  # 2. Maker（挂单方）：提供流动性，但仍支付手续费（不是 rebate）
+  # 3. 只有达到做市商返佣等级（14天成交量占比>0.5%）才有负费率
+  # 4. VIP 等级（>$5M/14天）可降低费率，详见 https://hyperliquid.xyz/fees
+
 # 监控配置
 monitoring:
   # 性能指标
