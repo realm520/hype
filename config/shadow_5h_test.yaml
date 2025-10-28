@@ -1,0 +1,190 @@
+# 5 小时多币种影子交易测试配置
+# 币种：ETH, SOL, ZEC
+# 目标：验证系统稳定性和信号质量
+
+# 继承基础配置
+base_config: "base.yaml"
+
+# 运行环境
+environment: "mainnet"
+
+# 影子交易模式
+shadow_mode:
+  enabled: true
+  duration_hours: 5.0  # 5 小时完整测试
+  start_time: null  # 立即开始
+
+  # 成交模拟配置
+  fill_simulation:
+    method: "realistic"
+    max_slippage_bps: 50.0
+    partial_fill_enabled: true
+
+  # 初始资金
+  initial_nav: 100000
+
+  # Week 2 混合订单配置
+  orders:
+    # IOC 订单配置（高置信度）
+    ioc:
+      enabled: true
+      default_size: 0.01
+      price_adjustment_bps: 10.0  # IOC 加价以确保成交
+
+    # 限价单配置（中等置信度）
+    limit:
+      enabled: true
+      default_size: 0.01
+      timeout_seconds: 5.0  # 超时后撤单
+      use_post_only: true  # 确保成为 Maker
+
+    # 订单路由配置
+    routing:
+      enable_fallback: true  # 限价单超时后回退到 IOC
+      fallback_timeout_seconds: 5.0
+
+# 信号配置
+signals:
+  aggregation:
+    method: "weighted_average"
+    min_confidence: 0.1
+
+  thresholds:
+    theta_1: 0.7  # 高置信度阈值
+    theta_2: 0.4  # 中置信度阈值
+
+  # 信号源
+  sources:
+    obi:
+      enabled: true
+      weight: 0.4
+      levels: 5
+    microprice:
+      enabled: true
+      weight: 0.3
+    impact:
+      enabled: true
+      weight: 0.3
+
+# 分析配置（5 小时测试优化）
+analytics:
+  ic_calculation:
+    window_hours: 2.0  # 2 小时 IC 窗口，足够积累样本
+    min_samples: 50  # 更严格的最小样本数要求
+    update_interval_minutes: 5  # 每 5 分钟更新一次 IC
+
+  # 未来收益跟踪（用于 IC 计算）
+  future_return:
+    window_minutes: 10  # T+10 分钟收益窗口
+    update_interval_seconds: 30  # 每 30 秒更新一次
+
+  pnl_attribution:
+    update_interval_minutes: 5
+    save_to_file: true
+    output_dir: "logs/shadow_5h_test"
+
+  # 上线标准（Week 1 标准）
+  launch_criteria:
+    ic_min: 0.03
+    alpha_pct_min: 70.0
+    cost_pct_max: 25.0
+    uptime_pct_min: 99.5
+    p99_latency_ms_max: 150.0
+    win_rate_min: 60.0
+
+# 实时监控
+monitoring:
+  live_monitor:
+    enabled: true
+    update_interval_seconds: 120  # 每 2 分钟更新
+
+    alert_thresholds:
+      latency_ms: 200
+      fill_rate_pct: 85
+      drawdown_pct: 3.0
+      consecutive_losses: 5
+
+  logging:
+    level: "INFO"
+    format: "json"
+    file_rotation: "daily"
+    output_dir: "logs/shadow_5h_test"
+
+    include_fields:
+      - "timestamp"
+      - "event"
+      - "symbol"
+      - "signal_value"
+      - "confidence"
+      - "execution_result"
+      - "latency_ms"
+      - "pnl"
+
+# 数据配置
+data:
+  orderbook:
+    levels: 10
+    update_frequency: 100
+
+  persistence:
+    enabled: true
+    save_interval_minutes: 10  # 每 10 分钟保存一次
+    output_dir: "data/shadow_5h_test"
+    formats:
+      - "parquet"
+      - "json"
+
+# Hyperliquid 连接（3 个币种）
+hyperliquid:
+  endpoint: "mainnet"
+
+  websocket:
+    reconnect_enabled: true
+    reconnect_max_attempts: 10
+    reconnect_delay_seconds: 5
+    heartbeat_interval_seconds: 30
+
+  subscriptions:
+    symbols:
+      - "ETH"  # 以太坊
+      - "SOL"  # Solana
+      - "ZEC"  # Zcash
+    channels:
+      - "l2Book"
+      - "trades"
+      - "user"
+
+# 风控配置
+risk:
+  hard_limits:
+    max_single_loss_pct: 0.008  # 单笔最大亏损 0.8%
+    max_daily_drawdown_pct: 0.05  # 日最大回撤 5%
+    max_position_size_usd: 10000
+
+  position:
+    max_leverage: 5
+    inventory_target: 0
+    inventory_tolerance: 0.2
+
+# 报告配置
+reporting:
+  realtime:
+    enabled: true
+    interval_minutes: 10  # 每 10 分钟生成中期报告
+    include_charts: true
+
+  final_report:
+    enabled: true
+    output_dir: "docs/shadow_5h_test"
+    formats:
+      - "html"
+      - "json"
+      - "markdown"
+
+    sections:
+      - "summary"
+      - "signal_quality"
+      - "execution_efficiency"
+      - "risk_metrics"
+      - "pnl_attribution"
+      - "launch_readiness"

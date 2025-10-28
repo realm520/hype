@@ -194,6 +194,7 @@ hype/
 │   ├── analytics/                # 分析模块
 │   │   ├── pnl_attribution.py    # PnL 归因
 │   │   ├── signal_validation.py  # 信号前瞻性检验
+│   │   ├── future_return_tracker.py  # 未来收益跟踪（含价格历史存储）
 │   │   └── metrics.py            # 性能指标
 │   └── hyperliquid/              # Hyperliquid 集成
 │       ├── api_client.py         # REST API 客户端
@@ -287,6 +288,25 @@ hype/
 #### 5. 分析层（src/analytics/）
 
 **职责**：性能分析与 PnL 归因
+
+**核心组件**：
+- `future_return_tracker.py` - 未来收益跟踪器（含价格历史存储）
+- `pnl_attribution.py` - PnL 归因分析
+- `signal_validation.py` - 信号前瞻性检验
+- `metrics.py` - 性能指标计算
+
+**FutureReturnTracker 核心功能**（新增）：
+1. **实时价格历史存储**：滚动保留 1 小时价格数据（< 4 MB 内存）
+2. **T+n 未来收益计算**：自动计算信号的 T+10 分钟方向性收益
+3. **测试后回填 IC**：测试结束后使用存储的价格计算多窗口 IC（T+5, T+10, T+15, T+30）
+4. **自动清理机制**：超过窗口的旧价格自动清理，保持内存可控
+
+**使用示例**：
+```python
+# 在测试结束时自动回填多窗口 IC
+backfill_results = tracker.backfill_future_returns([5, 10, 15, 30])
+# 返回：{signal_id: {window_minutes: future_return}}
+```
 
 **PnL 分解公式**：
 ```
