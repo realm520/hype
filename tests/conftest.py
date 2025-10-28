@@ -217,7 +217,7 @@ def test_config():
         hyperliquid=HyperliquidConfig(
             wallet_address="0x0000000000000000000000000000000000000001",
             private_key="test_private_key",
-            use_mainnet=False,  # 测试模式使用 testnet
+            use_mainnet=True,
             symbols=["ETH", "BTC"],
         ),
         signals=SignalConfig(

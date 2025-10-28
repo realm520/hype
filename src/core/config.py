@@ -125,11 +125,10 @@ class ExecutionConfig(BaseModel):
 
 
 class HyperliquidConfig(BaseModel):
-    """Hyperliquid 配置"""
+    """Hyperliquid 配置（仅 mainnet）"""
 
     wallet_address: str = Field(..., description="钱包地址")
     private_key: str = Field(..., description="私钥")
-    use_mainnet: bool = Field(default=True, description="使用 mainnet")
     symbols: list[str] = Field(default_factory=lambda: ["BTC", "ETH"])
 
 
@@ -243,11 +242,10 @@ def load_config(config_path: str = "config/week1_ioc.yaml") -> Config:
     # 加载环境变量
     env_settings = EnvironmentSettings()
 
-    # 构建 Hyperliquid 配置
+    # 构建 Hyperliquid 配置（固定 mainnet）
     hyperliquid_config = HyperliquidConfig(
         wallet_address=env_settings.hyperliquid_wallet_address,
         private_key=env_settings.hyperliquid_private_key,
-        use_mainnet=env_settings.environment.lower() == "mainnet",
         symbols=yaml_config.get("hyperliquid", {}).get("symbols", ["BTC", "ETH"]),
     )
 
@@ -301,7 +299,7 @@ def load_config(config_path: str = "config/week1_ioc.yaml") -> Config:
 
     logger.info(
         "config_loaded",
-        network="mainnet" if hyperliquid_config.use_mainnet else "testnet",
+        network="mainnet",
         symbols=hyperliquid_config.symbols,
     )
 

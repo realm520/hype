@@ -1,7 +1,7 @@
 """Hyperliquid API 客户端封装
 
 封装 hyperliquid-python-sdk 的 Exchange 类，提供统一的 API 接口。
-默认使用 mainnet。
+仅支持 mainnet。
 """
 
 import os
@@ -18,13 +18,12 @@ logger = structlog.get_logger()
 
 
 class HyperliquidAPIClient:
-    """Hyperliquid API 客户端"""
+    """Hyperliquid API 客户端（仅 mainnet）"""
 
     def __init__(
         self,
         wallet_address: str,
         private_key: str,
-        use_mainnet: bool = True,
     ):
         """
         初始化 API 客户端
@@ -32,18 +31,12 @@ class HyperliquidAPIClient:
         Args:
             wallet_address: 钱包地址
             private_key: 私钥
-            use_mainnet: 是否使用 mainnet（默认 True）
         """
         self.wallet_address = wallet_address
-        self.use_mainnet = use_mainnet
 
-        # 选择 API 端点
-        if use_mainnet:
-            base_url = constants.MAINNET_API_URL
-            logger.info("initialized_hyperliquid_client", network="mainnet")
-        else:
-            base_url = constants.TESTNET_API_URL
-            logger.info("initialized_hyperliquid_client", network="testnet")
+        # 固定使用 mainnet
+        base_url = constants.MAINNET_API_URL
+        logger.info("initialized_hyperliquid_client", network="mainnet")
 
         # 初始化 SDK Exchange 对象
         self.exchange = HyperliquidExchange(
@@ -224,29 +217,24 @@ class HyperliquidAPIClient:
 # 工厂函数
 def create_api_client_from_env() -> HyperliquidAPIClient:
     """
-    从环境变量创建 API 客户端
+    从环境变量创建 API 客户端（仅 mainnet）
 
     环境变量：
         HYPERLIQUID_WALLET_ADDRESS: 钱包地址
         HYPERLIQUID_PRIVATE_KEY: 私钥
-        ENVIRONMENT: mainnet | testnet（默认 mainnet）
 
     Returns:
         HyperliquidAPIClient: API 客户端实例
     """
     wallet_address = os.getenv("HYPERLIQUID_WALLET_ADDRESS")
     private_key = os.getenv("HYPERLIQUID_PRIVATE_KEY")
-    environment = os.getenv("ENVIRONMENT", "mainnet").lower()
 
     if not wallet_address:
         raise ValueError("HYPERLIQUID_WALLET_ADDRESS not set")
     if not private_key:
         raise ValueError("HYPERLIQUID_PRIVATE_KEY not set")
 
-    use_mainnet = environment == "mainnet"
-
     return HyperliquidAPIClient(
         wallet_address=wallet_address,
         private_key=private_key,
-        use_mainnet=use_mainnet,
     )

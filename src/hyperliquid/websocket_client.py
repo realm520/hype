@@ -1,7 +1,7 @@
 """Hyperliquid WebSocket 客户端封装
 
 封装 hyperliquid-python-sdk 的 WebSocket 功能，提供订单簿和成交数据订阅。
-默认使用 mainnet。
+仅支持 mainnet。
 """
 
 import os
@@ -16,24 +16,13 @@ logger = structlog.get_logger()
 
 
 class HyperliquidWebSocket:
-    """Hyperliquid WebSocket 客户端"""
+    """Hyperliquid WebSocket 客户端（仅 mainnet）"""
 
-    def __init__(self, use_mainnet: bool = True):
-        """
-        初始化 WebSocket 客户端
-
-        Args:
-            use_mainnet: 是否使用 mainnet（默认 True）
-        """
-        self.use_mainnet = use_mainnet
-
-        # 选择 API 端点
-        if use_mainnet:
-            base_url = constants.MAINNET_API_URL
-            logger.info("initialized_websocket_client", network="mainnet")
-        else:
-            base_url = constants.TESTNET_API_URL
-            logger.info("initialized_websocket_client", network="testnet")
+    def __init__(self):
+        """初始化 WebSocket 客户端"""
+        # 固定使用 mainnet
+        base_url = constants.MAINNET_API_URL
+        logger.info("initialized_websocket_client", network="mainnet")
 
         # 初始化 SDK Info 对象（包含 WebSocket 功能）
         self.info = Info(base_url=base_url, skip_ws=False)
@@ -231,15 +220,9 @@ class HyperliquidWebSocket:
 # 工厂函数
 def create_websocket_from_env() -> HyperliquidWebSocket:
     """
-    从环境变量创建 WebSocket 客户端
-
-    环境变量：
-        ENVIRONMENT: mainnet | testnet（默认 mainnet）
+    从环境变量创建 WebSocket 客户端（仅 mainnet）
 
     Returns:
         HyperliquidWebSocket: WebSocket 客户端实例
     """
-    environment = os.getenv("ENVIRONMENT", "mainnet").lower()
-    use_mainnet = environment == "mainnet"
-
-    return HyperliquidWebSocket(use_mainnet=use_mainnet)
+    return HyperliquidWebSocket()
