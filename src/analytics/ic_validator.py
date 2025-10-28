@@ -9,8 +9,8 @@
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import List, Tuple, Dict, Any
+from datetime import datetime
+from typing import Any
 
 import numpy as np
 import structlog
@@ -28,8 +28,8 @@ class ICTestResult:
     ic_value: float | None = None
     p_value: float | None = None
     sample_size: int = 0
-    details: Dict[str, Any] | None = None
-    warnings: List[str] | None = None
+    details: dict[str, Any] | None = None
+    warnings: list[str] | None = None
 
 
 class ICRobustnessValidator:
@@ -73,7 +73,7 @@ class ICRobustnessValidator:
             p_value_threshold=p_value_threshold,
         )
 
-    def run_all_tests(self) -> List[ICTestResult]:
+    def run_all_tests(self) -> list[ICTestResult]:
         """运行所有验证测试
 
         Returns:
@@ -244,7 +244,7 @@ class ICRobustnessValidator:
             warnings=warnings if warnings else None,
         )
 
-    def time_split_analysis(self) -> List[ICTestResult]:
+    def time_split_analysis(self) -> list[ICTestResult]:
         """分时段 IC 分析
 
         按小时、星期几等维度分组计算 IC

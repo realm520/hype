@@ -33,9 +33,15 @@ class OrderRouter:
         - 提高整体成交率，避免错失机会
 
     成本优化目标：
-        - Week 1: 100% Taker (费率 5 bps)
-        - Week 2: 30% Taker + 70% Maker (预期费率 -0.5 bps)
-        - 成本降低: -521.8% → -150%
+        - Week 1: 100% Taker (费率 4.5 bps)
+        - Week 2: 30% Taker + 70% Maker (预期费率 2.4 bps)
+        - 计算：0.30 × 4.5 + 0.70 × 1.5 = 1.35 + 1.05 = 2.4 bps
+        - 成本降低：2.1 bps (47% 降低)
+
+    费率说明：
+        - Taker (IOC)：+0.045% (4.5 bps)
+        - Maker (限价单)：+0.015% (1.5 bps，不是 rebate)
+        - 节省：3 bps/单
     """
 
     def __init__(

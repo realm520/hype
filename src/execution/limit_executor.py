@@ -30,13 +30,18 @@ class LimitExecutor:
 
     Week 2 策略：
         - MEDIUM 置信度 → 执行限价单（Post-only）
-        - 贴盘口价格，争取 Maker 费率（-0.02%）
+        - 贴盘口价格，使用 Maker 费率（+0.015%，比 Taker 节省 3 bps）
         - 超时未成交 → 撤单
 
     执行逻辑：
         1. 信号 theta_2 < |signal| ≤ theta_1 → 限价单
         2. 下单后监控成交状态
         3. 超时未成交 → 撤单（返回 None 供路由器重试）
+
+    费率对比：
+        - Maker：+0.015%（1.5 bps）
+        - Taker：+0.045%（4.5 bps）
+        - 节省：3 bps = 0.03%
     """
 
     def __init__(

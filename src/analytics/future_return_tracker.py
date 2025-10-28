@@ -5,9 +5,9 @@
 
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Callable
 
 import structlog
 

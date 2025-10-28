@@ -256,12 +256,12 @@ class FillSimulator:
         price: Decimal,
     ) -> "FillSimulationResult":
         """
-        模拟限价单成交（Maker 费率 -0.02%）
+        模拟限价单成交（Maker 费率 +0.015%）
 
         限价单特点：
             - 贴盘口价格
             - 成为 Maker（提供流动性）
-            - 费率 -0.02%（rebate）
+            - 费率 +0.015%（1.5 bps 正费率，不是 rebate）
             - 无滑点（价格精确）
 
         Args:
@@ -289,7 +289,7 @@ class FillSimulator:
             side=side.name,
             filled_size=float(filled_size),
             price=float(price),
-            fee_bps=-0.2,  # Maker rebate
+            fee_bps=0.15,  # Maker 费率 1.5 bps（正费率）
         )
 
         result = FillSimulationResult(

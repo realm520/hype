@@ -128,7 +128,7 @@ class ShadowLimitExecutor:
             await asyncio.sleep(0.001)  # 模拟等待时间
 
             if random.random() < fill_probability:
-                # 限价单成交（Maker 费率 -0.02%）
+                # 限价单成交（Maker 费率 +0.015%）
                 fill_result = self.fill_simulator.simulate_limit_fill(
                     market_data=market_data,
                     side=side,
@@ -147,7 +147,7 @@ class ShadowLimitExecutor:
                     size=float(order_size),
                     filled_size=float(fill_result.filled_size),
                     slippage=float(fill_result.slippage),
-                    fee_bps=-0.2,  # Maker rebate
+                    fee_bps=0.15,  # Maker 费率 1.5 bps（正费率）
                 )
 
                 execution_result = fill_result.to_execution_result()

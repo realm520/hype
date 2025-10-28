@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.analytics.future_return_tracker import FutureReturnTracker, SignalSnapshot
+from src.analytics.future_return_tracker import FutureReturnTracker
 
 
 @pytest.fixture

@@ -12,12 +12,12 @@ class TestPnLAttribution:
     def test_initialization(self):
         """测试初始化"""
         attribution = PnLAttribution(
-            fee_rate=0.0002,
+            fee_rate=0.00045,
             alpha_threshold=0.70,
             max_history=1000,
         )
 
-        assert attribution.fee_rate == Decimal("0.0002")
+        assert attribution.fee_rate == Decimal("0.00045")
         assert attribution.alpha_threshold == 0.70
         assert len(attribution._attribution_history) == 0
 
@@ -69,7 +69,7 @@ class TestPnLAttribution:
 
     def test_fee_calculation(self, sample_buy_order):
         """测试手续费计算"""
-        attribution = PnLAttribution(fee_rate=0.0002)
+        attribution = PnLAttribution(fee_rate=0.00045)
 
         result = attribution.attribute_trade(
             order=sample_buy_order,
@@ -81,7 +81,7 @@ class TestPnLAttribution:
 
         # 手续费 = 交易价值 * 费率
         expected_fee = -(
-            sample_buy_order.size * sample_buy_order.price * Decimal("0.0002")
+            sample_buy_order.size * sample_buy_order.price * Decimal("0.00045")
         )
         assert abs(result.fee - expected_fee) < Decimal("0.001")
 

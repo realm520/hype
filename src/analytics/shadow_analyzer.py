@@ -150,7 +150,7 @@ class ShadowAnalyzer:
         # 系统监控
         self._start_time = time.time()
         self._total_downtime_seconds = 0.0
-        
+
         # NAV 历史（用于计算夏普比率）
         self._nav_history: list[tuple[float, Decimal]] = []  # [(timestamp, nav), ...]
 
@@ -172,7 +172,7 @@ class ShadowAnalyzer:
             record: 影子执行记录
         """
         self._execution_records.append(record)
-        
+
         # 记录 NAV 历史（用于夏普比率计算）
         current_nav = self.initial_nav + self.position_manager.get_total_pnl()
         self._nav_history.append((time.time(), current_nav))
@@ -587,7 +587,7 @@ class ShadowAnalyzer:
 
         # 计算夏普比率
         sharpe_ratio = self._calculate_sharpe_ratio()
-        
+
         return RiskMetrics(
             max_drawdown=self._max_drawdown,
             max_drawdown_pct=max_drawdown_pct,
@@ -608,27 +608,27 @@ class ShadowAnalyzer:
         """
         if len(self._nav_history) < 2:
             return 0.0
-        
+
         # 计算收益率序列
         returns = []
         for i in range(1, len(self._nav_history)):
             prev_nav = self._nav_history[i-1][1]
             curr_nav = self._nav_history[i][1]
-            
+
             if prev_nav > 0:
                 ret = float((curr_nav - prev_nav) / prev_nav)
                 returns.append(ret)
-        
+
         if not returns:
             return 0.0
-        
+
         # 计算统计量
         mean_return = float(np.mean(returns))
         std_return = float(np.std(returns))
-        
+
         if std_return == 0:
             return 0.0
-        
+
         # 年化因子
         # 假设每次执行间隔约 100ms（高频交易）
         # 每天交易 8 小时 = 8 * 3600 = 28800 秒
@@ -636,10 +636,10 @@ class ShadowAnalyzer:
         # 一年 252 个交易日
         executions_per_day = 8 * 3600 * 10
         annualization_factor = np.sqrt(executions_per_day * 252)
-        
+
         # 无风险利率假设为 0（加密货币）
         sharpe = mean_return / std_return * annualization_factor
-        
+
         return float(sharpe)
 
     def calculate_pnl_attribution(self) -> PnLAttribution:
@@ -661,11 +661,11 @@ class ShadowAnalyzer:
             if record.execution_result and not record.skipped:
                 num_trades += 1
 
-                # 手续费（Taker 费率 5 bps，负数表示成本）
+                # 手续费（Taker 费率 4.5 bps，负数表示成本）
                 fill_value = (
                     record.fill_result.filled_size * record.fill_result.avg_fill_price
                 )
-                fee_total -= fill_value * Decimal("0.0005")
+                fee_total -= fill_value * Decimal("0.00045")
 
                 # 滑点（负数表示成本）
                 slippage_total -= abs(record.fill_result.slippage) * record.fill_result.filled_size

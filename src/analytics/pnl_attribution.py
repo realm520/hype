@@ -9,6 +9,7 @@ from decimal import Decimal
 
 import structlog
 
+from src.core.constants import HYPERLIQUID_TAKER_FEE_RATE
 from src.core.types import Order, OrderSide
 
 logger = structlog.get_logger()
@@ -48,7 +49,7 @@ class PnLAttribution:
 
     def __init__(
         self,
-        fee_rate: float = 0.0002,  # 0.02% Taker 手续费
+        fee_rate: float = 0.00045,  # 0.045% Taker 手续费（4.5 bps）
         alpha_threshold: float = 0.70,  # Alpha 占比阈值（70%）
         max_history: int = 10000,
     ):
@@ -56,11 +57,11 @@ class PnLAttribution:
         初始化 PnL 归因分析器
 
         Args:
-            fee_rate: 手续费率（默认 0.02% Taker）
+            fee_rate: 手续费率（默认 0.045% Taker，4.5 bps）
             alpha_threshold: Alpha 占比健康阈值（默认 70%）
             max_history: 最大历史记录数
         """
-        self.fee_rate = Decimal(str(fee_rate))
+        self.fee_rate = Decimal(str(fee_rate)) if fee_rate != 0.00045 else HYPERLIQUID_TAKER_FEE_RATE
         self.alpha_threshold = alpha_threshold
         self.max_history = max_history
 
