@@ -6,7 +6,7 @@
 用法:
     # 从测试报告验证
     python scripts/validate_ic_robustness.py \\
-        --report docs/shadow_test/shadow_trading_report_20251028_001418.json
+        --report data/tests/shadow/reports/shadow_trading_report_20251028_001418.json
 
     # 从日志文件提取并验证
     python scripts/validate_ic_robustness.py \\
@@ -24,7 +24,6 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
 
 import numpy as np
 import structlog
@@ -70,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        help="输出报告路径（默认：docs/ic_robustness_report.txt）",
+        help="输出报告路径（默认：docs/reports/ic_robustness_report.txt）",
     )
 
     parser.add_argument(
@@ -90,7 +89,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_data_from_report(report_path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+def load_data_from_report(report_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """从测试报告加载数据
 
     注意：由于报告只包含聚合指标，这里我们需要从日志重建信号-收益序列
@@ -144,7 +143,7 @@ def load_data_from_report(report_path: Path) -> Tuple[np.ndarray, np.ndarray, np
     return signals, returns, timestamps
 
 
-def load_data_from_log(log_path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def load_data_from_log(log_path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """从日志文件加载真实数据
 
     解析 ic_calculated 事件，重建信号-收益序列
@@ -188,7 +187,7 @@ def load_data_from_log(log_path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarr
     )
 
 
-def generate_text_report(results: List[ICTestResult], output_path: Path | None = None):
+def generate_text_report(results: list[ICTestResult], output_path: Path | None = None):
     """生成文本格式报告
 
     Args:
@@ -328,7 +327,7 @@ def main():
         sys.exit(1)
 
     # 生成报告
-    output_path = args.output or Path("docs/ic_robustness_report.txt")
+    output_path = args.output or Path("docs/reports/ic_robustness_report.txt")
     generate_text_report(results, output_path if not args.verbose else None)
 
     # 返回状态码

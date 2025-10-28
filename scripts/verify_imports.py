@@ -4,10 +4,9 @@
 """
 
 import sys
-from typing import List, Tuple
 
 
-def verify_imports() -> List[Tuple[str, bool, str]]:
+def verify_imports() -> list[tuple[str, bool, str]]:
     """验证所有导入"""
     results = []
 

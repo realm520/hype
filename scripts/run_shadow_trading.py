@@ -8,35 +8,33 @@
 """
 
 import asyncio
-import signal
 import time
-from pathlib import Path
-from decimal import Decimal
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
 from dataclasses import asdict
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+
+import pandas as pd
 import structlog
 import yaml
-import pandas as pd
 
+from src.analytics.future_return_tracker import FutureReturnTracker
+from src.analytics.live_monitor import LiveMonitor
+from src.analytics.shadow_analyzer import ShadowAnalyzer
 from src.core.data_feed import MarketDataManager
-from src.core.logging import setup_logging, get_audit_logger
-from src.hyperliquid.websocket_client import HyperliquidWebSocket
-from src.signals.aggregator import create_aggregator_from_config
+from src.core.logging import get_audit_logger, setup_logging
 from src.execution.fill_simulator import FillSimulator
 from src.execution.shadow_executor import (
-    ShadowIOCExecutor,
     ShadowExecutionRecord,
+    ShadowIOCExecutor,
 )
 from src.execution.shadow_order_router import (
-    ShadowOrderRouter,
     ShadowLimitExecutor,
+    ShadowOrderRouter,
 )
+from src.hyperliquid.websocket_client import HyperliquidWebSocket
 from src.risk.shadow_position_manager import ShadowPositionManager
-from src.analytics.shadow_analyzer import ShadowAnalyzer
-from src.analytics.live_monitor import LiveMonitor
-from src.analytics.future_return_tracker import FutureReturnTracker
-from src.core.types import MarketData
+from src.signals.aggregator import create_aggregator_from_config
 
 logger = structlog.get_logger()
 
@@ -64,7 +62,7 @@ class ShadowTradingEngine:
             config_path: 配置文件路径
         """
         # 加载配置
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             self.config = yaml.safe_load(f)
 
         self.symbols = self.config["hyperliquid"]["subscriptions"]["symbols"]
@@ -72,11 +70,11 @@ class ShadowTradingEngine:
         self.initial_nav = Decimal(str(self.config["shadow_mode"]["initial_nav"]))
 
         self._running = False
-        self._start_time: Optional[float] = None
-        self._end_time: Optional[float] = None
+        self._start_time: float | None = None
+        self._end_time: float | None = None
 
         # 执行记录（用于最终分析）
-        self.execution_records: List[ShadowExecutionRecord] = []
+        self.execution_records: list[ShadowExecutionRecord] = []
 
         # 状态保存配置
         self.save_interval = (
@@ -558,7 +556,7 @@ class ShadowTradingEngine:
             if report.pnl_attribution.win_rate is not None:
                 print(f"胜率: {report.pnl_attribution.win_rate:.1f}%")
             else:
-                print(f"胜率: N/A (需要完整持仓追踪)")
+                print("胜率: N/A (需要完整持仓追踪)")
             print(f"总盈亏: ${float(report.pnl_attribution.total_pnl):,.2f}")
             print(f"\n详细报告: {md_file}")
             print("=" * 80 + "\n")
@@ -570,7 +568,6 @@ class ShadowTradingEngine:
         self, report: "ShadowTradingReport"
     ) -> str:  # noqa: F821
         """格式化报告为 Markdown"""
-        from src.analytics.shadow_analyzer import ShadowTradingReport
 
         lines = []
         lines.append("# 影子交易验证报告\n")
@@ -649,7 +646,7 @@ class ShadowTradingEngine:
         if report.pnl_attribution.win_rate is not None:
             lines.append(f"- **胜率**: {report.pnl_attribution.win_rate:.1f}%\n")
         else:
-            lines.append(f"- **胜率**: N/A (需要完整持仓追踪系统)\n")
+            lines.append("- **胜率**: N/A (需要完整持仓追踪系统)\n")
 
         # 新增：各币种交易统计
         if report.per_symbol_trades:

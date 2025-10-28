@@ -7,18 +7,19 @@
     python scripts/start_trading.py --check-config
 """
 
-import sys
-import asyncio
 import argparse
+import asyncio
+import sys
 from pathlib import Path
+
 import structlog
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.main import TradingEngine
 from src.core.config import load_config
+from src.main import TradingEngine
 
 logger = structlog.get_logger()
 

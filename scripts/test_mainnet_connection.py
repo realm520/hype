@@ -8,16 +8,15 @@
     python scripts/test_mainnet_connection.py --duration 60  # 测试 60 秒
 """
 
-import asyncio
 import argparse
+import asyncio
 import time
-from typing import Dict, List
 from datetime import datetime
+
 import structlog
 
 from src.core.data_feed import MarketDataManager
 from src.hyperliquid.websocket_client import HyperliquidWebSocket
-from src.core.types import MarketData
 
 logger = structlog.get_logger()
 
@@ -38,7 +37,7 @@ class ConnectionTester:
         self.symbols = ["BTC", "ETH"]
 
         # 统计数据
-        self.stats: Dict[str, Dict[str, int]] = {
+        self.stats: dict[str, dict[str, int]] = {
             symbol: {
                 "l2_updates": 0,
                 "trade_updates": 0,
@@ -46,7 +45,7 @@ class ConnectionTester:
             }
             for symbol in self.symbols
         }
-        self.connection_issues: List[str] = []
+        self.connection_issues: list[str] = []
 
         logger.info(
             "connection_tester_initialized",
@@ -54,7 +53,7 @@ class ConnectionTester:
             test_duration=test_duration,
         )
 
-    async def run_test(self) -> Dict[str, any]:
+    async def run_test(self) -> dict[str, any]:
         """
         运行连接测试
 
@@ -210,7 +209,7 @@ class ConnectionTester:
 
     def _generate_test_report(
         self, start_time: float, end_time: float
-    ) -> Dict[str, any]:
+    ) -> dict[str, any]:
         """生成测试报告"""
         duration = end_time - start_time
 
@@ -242,7 +241,7 @@ class ConnectionTester:
         }
 
 
-def print_test_report(result: Dict[str, any]) -> None:
+def print_test_report(result: dict[str, any]) -> None:
     """打印测试报告"""
     print("\n" + "=" * 80)
     print("Mainnet 连接测试报告")

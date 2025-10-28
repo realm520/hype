@@ -7,14 +7,15 @@
 
 import asyncio
 import sys
-from pathlib import Path
-from decimal import Decimal
 import time
+from decimal import Decimal
+from pathlib import Path
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import structlog
+
 from src.core.config import load_config
 from src.main import TradingEngine
 
@@ -227,7 +228,7 @@ class SystemValidator:
         logger.info("验证步骤 5/6: 风控检查")
 
         try:
-            from src.core.types import Order, OrderType, OrderSide, OrderStatus
+            from src.core.types import Order, OrderSide, OrderStatus, OrderType
 
             # 创建测试订单
             test_order = Order(

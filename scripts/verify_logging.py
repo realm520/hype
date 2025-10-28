@@ -8,7 +8,6 @@
 4. 日志级别控制
 """
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -16,7 +15,7 @@ from pathlib import Path
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.logging import setup_logging, get_logger, get_audit_logger
+from src.core.logging import get_audit_logger, get_logger, setup_logging
 
 
 def main():
@@ -84,7 +83,7 @@ def main():
     audit_log = log_dir / "audit.log"
 
     if trading_log.exists():
-        with open(trading_log, "r") as f:
+        with open(trading_log) as f:
             lines = f.readlines()
             print(f"   ✅ 交易日志：{trading_log}")
             print(f"      共 {len(lines)} 行记录")
@@ -92,7 +91,7 @@ def main():
         print(f"   ❌ 交易日志文件未创建：{trading_log}")
 
     if audit_log.exists():
-        with open(audit_log, "r") as f:
+        with open(audit_log) as f:
             lines = f.readlines()
             print(f"   ✅ 审计日志：{audit_log}")
             print(f"      共 {len(lines)} 行记录")
@@ -102,7 +101,7 @@ def main():
     print("\n5. 查看日志内容示例：")
 
     if trading_log.exists():
-        with open(trading_log, "r") as f:
+        with open(trading_log) as f:
             lines = f.readlines()
             if lines:
                 import json
@@ -116,7 +115,7 @@ def main():
                     print(f"      错误: {last_log.get('error')}")
 
     if audit_log.exists():
-        with open(audit_log, "r") as f:
+        with open(audit_log) as f:
             lines = f.readlines()
             if lines:
                 import json
@@ -130,7 +129,7 @@ def main():
                     print(f"      操作: {last_log.get('action')}")
 
     print("\n=== 验证完成 ===")
-    print(f"\n💡 提示：")
+    print("\n💡 提示：")
     print(f"   - 查看完整日志：cat {trading_log}")
     print(f"   - 查看审计日志：cat {audit_log}")
     print(f"   - 实时监控：tail -f {trading_log}")

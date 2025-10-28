@@ -5,8 +5,8 @@
 """
 
 import sys
-from pathlib import Path
 from decimal import Decimal
+from pathlib import Path
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,14 +20,14 @@ def validate_types():
     """验证类型系统"""
     try:
         from src.core.types import (
-            MarketData,
+            ConfidenceLevel,
             Level,
+            MarketData,
             Order,
-            OrderType,
             OrderSide,
             OrderStatus,
+            OrderType,
             SignalScore,
-            ConfidenceLevel,
         )
 
         # 创建测试对象
@@ -68,12 +68,13 @@ def validate_types():
 def validate_signals():
     """验证信号层"""
     try:
-        from src.signals.obi import OBISignal
-        from src.signals.microprice import MicropriceSignal
-        from src.signals.impact import ImpactSignal
-        from src.signals.aggregator import SignalAggregator
-        from src.core.types import MarketData, Level
         from decimal import Decimal
+
+        from src.core.types import Level, MarketData
+        from src.signals.aggregator import SignalAggregator
+        from src.signals.impact import ImpactSignal
+        from src.signals.microprice import MicropriceSignal
+        from src.signals.obi import OBISignal
 
         # 创建信号
         obi = OBISignal(levels=5, weight=0.4)
@@ -109,9 +110,10 @@ def validate_signals():
 def validate_execution():
     """验证执行层（模拟模式）"""
     try:
-        from src.execution.slippage_estimator import SlippageEstimator
-        from src.core.types import MarketData, Level, OrderSide
         from decimal import Decimal
+
+        from src.core.types import Level, MarketData, OrderSide
+        from src.execution.slippage_estimator import SlippageEstimator
 
         # 创建滑点估算器
         estimator = SlippageEstimator(max_slippage_bps=20.0)
@@ -141,10 +143,11 @@ def validate_execution():
 def validate_risk():
     """验证风控层"""
     try:
+        from decimal import Decimal
+
+        from src.core.types import Order, OrderSide, OrderStatus, OrderType
         from src.risk.hard_limits import HardLimits
         from src.risk.position_manager import PositionManager
-        from src.core.types import Order, OrderType, OrderSide, OrderStatus
-        from decimal import Decimal
 
         # 创建风控
         limits = HardLimits(
@@ -186,10 +189,11 @@ def validate_risk():
 def validate_analytics():
     """验证分析层"""
     try:
-        from src.analytics.pnl_attribution import PnLAttribution
-        from src.analytics.metrics import MetricsCollector
-        from src.core.types import Order, OrderType, OrderSide, OrderStatus
         from decimal import Decimal
+
+        from src.analytics.metrics import MetricsCollector
+        from src.analytics.pnl_attribution import PnLAttribution
+        from src.core.types import Order, OrderSide, OrderStatus, OrderType
 
         # 创建 PnL 归因
         attribution = PnLAttribution()

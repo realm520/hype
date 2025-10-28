@@ -8,16 +8,17 @@
     python scripts/analyze_shadow_results.py
 
     # 分析指定的记录文件
-    python scripts/analyze_shadow_results.py --file data/shadow_trading/final_records_20250125_120000.parquet
+    python scripts/analyze_shadow_results.py --file data/tests/shadow/records/final_records_20250125_120000.parquet
 
     # 生成 HTML 报告
     python scripts/analyze_shadow_results.py --format html
 """
 
 import argparse
-from pathlib import Path
-from typing import Dict, List, Any
 from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
 import structlog
 
@@ -50,7 +51,7 @@ def load_execution_records(file_path: Path) -> pd.DataFrame:
     return df
 
 
-def analyze_signal_quality(df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_signal_quality(df: pd.DataFrame) -> dict[str, Any]:
     """分析信号质量"""
     logger.info("analyzing_signal_quality")
 
@@ -82,7 +83,7 @@ def analyze_signal_quality(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def analyze_execution_efficiency(df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_execution_efficiency(df: pd.DataFrame) -> dict[str, Any]:
     """分析执行效率"""
     logger.info("analyzing_execution_efficiency")
 
@@ -121,7 +122,7 @@ def analyze_execution_efficiency(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def analyze_trade_distribution(df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_trade_distribution(df: pd.DataFrame) -> dict[str, Any]:
     """分析交易分布"""
     logger.info("analyzing_trade_distribution")
 
@@ -155,9 +156,9 @@ def analyze_trade_distribution(df: pd.DataFrame) -> Dict[str, Any]:
 
 def generate_markdown_report(
     records_file: Path,
-    signal_quality: Dict[str, Any],
-    execution_efficiency: Dict[str, Any],
-    trade_distribution: Dict[str, Any],
+    signal_quality: dict[str, Any],
+    execution_efficiency: dict[str, Any],
+    trade_distribution: dict[str, Any],
 ) -> str:
     """生成 Markdown 格式报告"""
 
@@ -213,9 +214,9 @@ def generate_markdown_report(
 
 def generate_html_report(
     records_file: Path,
-    signal_quality: Dict[str, Any],
-    execution_efficiency: Dict[str, Any],
-    trade_distribution: Dict[str, Any],
+    signal_quality: dict[str, Any],
+    execution_efficiency: dict[str, Any],
+    trade_distribution: dict[str, Any],
 ) -> str:
     """生成 HTML 格式报告（带图表）"""
 
@@ -297,8 +298,8 @@ def main() -> None:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="data/shadow_trading",
-        help="数据目录",
+        default="data/tests/shadow/records",
+        help="影子交易数据目录",
     )
     parser.add_argument(
         "--format",

@@ -8,7 +8,6 @@
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import pandas as pd
 from scipy import stats
@@ -38,8 +37,8 @@ class SignalReturnDiagnostic:
             log_file: 日志文件路径
         """
         self.log_file = log_file
-        self.signals: Dict[int, dict] = {}  # signal_id -> signal_data
-        self.returns: Dict[int, float] = {}  # signal_id -> future_return
+        self.signals: dict[int, dict] = {}  # signal_id -> signal_data
+        self.returns: dict[int, float] = {}  # signal_id -> future_return
 
     def parse_log(self) -> None:
         """解析日志文件"""
@@ -100,7 +99,7 @@ class SignalReturnDiagnostic:
         print(f"\n📊 配对数据集大小: {len(df)}")
         return df
 
-    def calculate_ic(self, df: pd.DataFrame) -> Dict[str, float]:
+    def calculate_ic(self, df: pd.DataFrame) -> dict[str, float]:
         """计算 IC 指标
 
         Args:
@@ -133,7 +132,7 @@ class SignalReturnDiagnostic:
             "by_symbol": ic_by_symbol,
         }
 
-    def calculate_quantile_returns(self, df: pd.DataFrame, n_quantiles: int = 5) -> Dict:
+    def calculate_quantile_returns(self, df: pd.DataFrame, n_quantiles: int = 5) -> dict:
         """计算分层收益
 
         Args:
