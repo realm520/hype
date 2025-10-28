@@ -128,12 +128,31 @@ class PnLAttribution:
             rebate = Decimal("0")
 
             # 5. 计算 Alpha（方向性收益）
-            # 基于信号值估算理论收益
-            # Alpha 反映信号预测的准确性和盈利能力
-            volatility = reference_price * Decimal("0.01")  # 假设 1% 波动率
-            alpha = Decimal(str(signal_value)) * volatility * order.size
+            # Alpha 基于实际价格变化和信号方向正确性
+            # 消除循环定义：Alpha 独立于 Total PnL
 
-            # 6. 计算 Total PnL
+            # 5.1 计算实际价格变化
+            price_move = actual_fill_price - reference_price
+
+            # 5.2 计算原始方向性 PnL
+            if order.side == OrderSide.BUY:
+                # 买入：价格上涨为正收益
+                raw_pnl = price_move * order.size
+            else:
+                # 卖出：价格下跌为正收益
+                raw_pnl = -price_move * order.size
+
+            # 5.3 判断信号方向是否正确
+            signal_direction = 1 if signal_value > 0 else -1
+            actual_direction = 1 if raw_pnl > 0 else -1
+
+            # 5.4 Alpha = 信号正确时的收益，错误时为负
+            if signal_direction == actual_direction:
+                alpha = abs(raw_pnl)  # 方向正确：正 Alpha
+            else:
+                alpha = -abs(raw_pnl)  # 方向错误：负 Alpha
+
+            # 6. 计算 Total PnL（独立计算，消除循环定义）
             # Total PnL = Alpha + Fee + Slippage + Impact + Rebate
             total_pnl = alpha + fee + slippage + impact + rebate
 
