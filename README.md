@@ -77,9 +77,9 @@ make validate-signals      # 信号验证
 make backtest-week1        # Week 1 回测
 make validate-all          # 全部验证
 
-# 运行（testnet）
-python -m src.main --env testnet --dry-run    # 干跑测试
-python -m src.main --env testnet              # 正式运行
+# 运行
+python -m src.main --dry-run    # 干跑测试
+python -m src.main              # 正式运行
 ```
 
 ## 项目结构
@@ -98,7 +98,6 @@ hype/
 
 ⚠️ **重要**：
 - 不要将 `.env` 文件提交到 Git
-- 使用 testnet 充分测试后再部署 mainnet
 - 定期审查交易日志和 PnL 归因
 - 遵守 Hyperliquid 平台的 API 限流规则
 

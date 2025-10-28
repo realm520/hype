@@ -1,4 +1,4 @@
-.PHONY: help setup install install-dev clean lint format typecheck test test-cov test-unit test-integration check pre-commit validate-signals backtest-week1 run-testnet-24h generate-report
+.PHONY: help setup install install-dev clean lint format typecheck test test-cov test-unit test-integration check pre-commit validate-signals backtest-week1 generate-report
 
 help: ## 显示帮助信息
 	@echo "Hyperliquid 高频交易系统 - 可用命令："
@@ -90,15 +90,6 @@ backtest-week1: ## 回测 Week 1 IOC-only 基线
 		--config config/week1_ioc.yaml \
 		--output docs/baseline_performance.html
 	@echo "✅ 回测完成，报告：docs/baseline_performance.html"
-
-run-testnet-24h: ## 在 testnet 运行 24 小时
-	@echo "🚀 启动 testnet 24h 运行..."
-	@echo "⚠️  请确保已配置 .env 文件"
-	uv run python -m src.main \
-		--config config/week1_ioc.yaml \
-		--env testnet \
-		--duration 86400
-	@echo "✅ 24h 运行完成"
 
 generate-report: ## 生成验证报告
 	@echo "📝 生成验证报告..."

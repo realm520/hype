@@ -86,8 +86,8 @@ HYPERLIQUID_API_KEY=your_api_key
 HYPERLIQUID_API_SECRET=your_api_secret
 HYPERLIQUID_WALLET_ADDRESS=your_wallet_address
 
-# 环境选择
-ENVIRONMENT=testnet  # testnet | mainnet | development
+# 环境选择（固定使用 mainnet）
+ENVIRONMENT=mainnet
 
 # 风控参数
 MAX_SINGLE_LOSS_PCT=0.008  # 0.8%
@@ -147,19 +147,17 @@ python scripts/run_week1_baseline.py \
     --output docs/baseline_performance.html
 ```
 
-### 实盘运行（testnet）
+### 实盘运行
 
 ```bash
-# 1. 启动交易系统（testnet）
+# 1. 启动交易系统（干跑验证）
 python -m src.main \
     --config config/week1_ioc.yaml \
-    --env testnet \
-    --dry-run  # 先干跑验证
+    --dry-run
 
-# 2. 正式运行（testnet）
+# 2. 正式运行
 python -m src.main \
-    --config config/week1_ioc.yaml \
-    --env testnet
+    --config config/week1_ioc.yaml
 
 # 3. 查看实时日志
 tail -f logs/trading_$(date +%Y%m%d).log
@@ -356,10 +354,7 @@ make validate-signals
 # 2. 回测验证
 make backtest-week1
 
-# 3. Testnet 验证（24h）
-make run-testnet-24h
-
-# 4. 生成验证报告
+# 3. 生成验证报告
 make generate-report
 ```
 
@@ -712,7 +707,7 @@ def test_obi_calculation():
 
 ### 集成测试
 
-**测试实际 API 交互**（使用 testnet）：
+**测试实际 API 交互**：
 
 ```python
 @pytest.mark.integration
@@ -734,10 +729,8 @@ async def test_ioc_execution():
 
 ### API 端点
 
-- **Mainnet REST API**：https://api.hyperliquid.xyz
-- **Mainnet WebSocket**：wss://api.hyperliquid.xyz/ws
-- **Testnet REST API**：https://api.hyperliquid-testnet.xyz
-- **Testnet WebSocket**：wss://api.hyperliquid-testnet.xyz/ws
+- **REST API**：https://api.hyperliquid.xyz
+- **WebSocket**：wss://api.hyperliquid.xyz/ws
 
 ### 订单类型
 
@@ -783,12 +776,12 @@ async def test_ioc_execution():
 
 ## 部署清单
 
-### Testnet 部署（Week 1）
+### 部署清单
 
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
-# 编辑 .env，设置 testnet 密钥
+# 编辑 .env，设置钱包地址和私钥
 
 # 2. 验证配置
 python -m src.main --check-config
@@ -796,33 +789,25 @@ python -m src.main --check-config
 # 3. 运行验证脚本
 make validate-all
 
-# 4. 启动交易系统
-python -m src.main --config config/week1_ioc.yaml --env testnet
+# 4. 启动交易系统（干跑）
+python -m src.main --config config/week1_ioc.yaml --dry-run
 
-# 5. 监控运行状态
+# 5. 正式启动
+python -m src.main --config config/week1_ioc.yaml
+
+# 6. 监控运行状态
 tail -f logs/trading_$(date +%Y%m%d).log
 ```
 
-### Mainnet 部署（需谨慎）
-
 **前置条件**：
-- [ ] Testnet 运行 ≥ 7 天
 - [ ] 所有 Week 1 指标达标
 - [ ] 风控充分测试
 - [ ] 代码审核通过
 
-```bash
-# 1. 更新环境变量
-ENVIRONMENT=mainnet
-
-# 2. 小额启动（初始资金 < 5% 总资金）
-INITIAL_NAV=5000 python -m src.main --config config/week1_ioc.yaml --env mainnet
-
-# 3. 密切监控 24h
-watch -n 60 'tail -20 logs/trading_$(date +%Y%m%d).log'
-
-# 4. 验证通过后逐步放大
-```
+**注意事项**：
+- 建议小额启动（初始资金 < 5% 总资金）
+- 密切监控前 24 小时
+- 验证通过后逐步放大
 
 ---
 

@@ -221,8 +221,6 @@ open test_analysis.html
 curl -v https://api.hyperliquid.xyz
 
 # 2. 检查防火墙/代理
-# 3. 尝试 testnet
-.venv/bin/python3 scripts/test_mainnet_connection.py --testnet
 ```
 
 ### Q2: 影子交易启动失败
