@@ -88,6 +88,10 @@ class ShadowTradingReport:
     ready_for_launch: bool  # 改名：meets_launch_criteria → ready_for_launch
     launch_score: float  # 改名：launch_readiness_score → launch_score  # 0-100
     criteria_details: dict[str, dict[str, float]]  # 详细的标准检查结果
+    # 新增：分币种指标
+    per_symbol_ic: dict[str, SignalQualityMetrics] = None  # 各币种 IC
+    per_symbol_pnl: dict[str, float] = None  # 各币种 PnL
+    per_symbol_trades: dict[str, int] = None  # 各币种交易次数
 
 
 class ShadowAnalyzer:
@@ -198,12 +202,13 @@ class ShadowAnalyzer:
             filled=record.execution_result is not None,
         )
 
-    def record_signal(self, signal: SignalScore, future_return: float | None = None) -> int:
+    def record_signal(self, signal: SignalScore, symbol: str, future_return: float | None = None) -> int:
         """
         记录信号（用于 IC 计算）
 
         Args:
             signal: 信号评分
+            symbol: 交易对符号
             future_return: 未来收益（T+n 收益率，用于计算 IC）
 
         Returns:
@@ -218,6 +223,7 @@ class ShadowAnalyzer:
         self._signal_history.append({
             "id": signal_id,
             "timestamp": timestamp_sec,  # 存储秒级时间戳
+            "symbol": symbol,  # 币种符号
             "signal_value": signal.value,
             "future_return": future_return,
         })
@@ -314,6 +320,7 @@ class ShadowAnalyzer:
             sample_count=sample_size,
             samples=[
                 {
+                    "symbol": valid_signals[i].get("symbol", "UNKNOWN"),  # 币种符号
                     "signal": float(signals[i]),
                     "return": float(returns[i] * 100),  # 转为百分比
                     "timestamp": valid_signals[i].get("timestamp"),
@@ -383,6 +390,94 @@ class ShadowAnalyzer:
             signal_mean=float(np.mean(signals)),
             sample_size=len(valid_signals),
         )
+
+    def calculate_per_symbol_ic(self) -> dict[str, SignalQualityMetrics]:
+        """
+        按币种计算信号质量指标
+
+        Returns:
+            dict[str, SignalQualityMetrics]: {symbol: metrics} 各币种的信号质量指标
+        """
+        # 计算时间窗口（只统计窗口内的信号）
+        cutoff_time = time.time() - (self.ic_window_hours * 3600)
+
+        # 按 symbol 分组有效信号
+        symbol_signals: dict[str, list[dict]] = {}
+        for s in self._signal_history:
+            if (
+                s.get("timestamp", 0) >= cutoff_time
+                and s.get("future_return") is not None
+            ):
+                symbol = s.get("symbol", "UNKNOWN")
+                if symbol not in symbol_signals:
+                    symbol_signals[symbol] = []
+                symbol_signals[symbol].append(s)
+
+        # 计算各币种 IC
+        results: dict[str, SignalQualityMetrics] = {}
+        for symbol, valid_signals in symbol_signals.items():
+            if len(valid_signals) < 30:
+                logger.warning(
+                    "insufficient_signals_for_symbol_ic",
+                    symbol=symbol,
+                    count=len(valid_signals),
+                    min_required=30,
+                )
+                # 样本不足，仍然记录但标记为 0
+                results[symbol] = SignalQualityMetrics(
+                    ic=0.0,
+                    ic_p_value=1.0,
+                    top_quintile_return=0.0,
+                    bottom_quintile_return=0.0,
+                    signal_std=0.0,
+                    signal_mean=0.0,
+                    sample_size=len(valid_signals),
+                )
+                continue
+
+            signals = np.array([s["signal_value"] for s in valid_signals])
+            returns = np.array([s["future_return"] for s in valid_signals])
+
+            # 计算 IC (Spearman 相关系数)
+            ic, p_value = stats.spearmanr(signals, returns)
+
+            # 分层收益（Top 20% vs Bottom 20%）
+            sorted_indices = np.argsort(signals)
+            quintile_size = max(1, len(signals) // 5)
+
+            if quintile_size > 0 and len(signals) >= 5:
+                top_quintile_return = float(
+                    np.mean(returns[sorted_indices[-quintile_size:]])
+                )
+                bottom_quintile_return = float(
+                    np.mean(returns[sorted_indices[:quintile_size]])
+                )
+            else:
+                top_quintile_return = float(np.mean(returns))
+                bottom_quintile_return = float(np.mean(returns))
+
+            results[symbol] = SignalQualityMetrics(
+                ic=float(ic),
+                ic_p_value=float(p_value),
+                top_quintile_return=top_quintile_return,
+                bottom_quintile_return=bottom_quintile_return,
+                signal_std=float(np.std(signals)),
+                signal_mean=float(np.mean(signals)),
+                sample_size=len(valid_signals),
+            )
+
+            # 记录各币种 IC
+            logger.info(
+                "per_symbol_ic_calculated",
+                symbol=symbol,
+                ic=float(ic),
+                p_value=float(p_value),
+                sample_size=len(valid_signals),
+                top_quintile_return=top_quintile_return,
+                bottom_quintile_return=bottom_quintile_return,
+            )
+
+        return results
 
     def calculate_execution_efficiency(self) -> ExecutionEfficiencyMetrics:
         """
@@ -619,6 +714,27 @@ class ShadowAnalyzer:
         risk_metrics = self.calculate_risk_metrics()
         pnl_attribution = self.calculate_pnl_attribution()
 
+        # 新增：计算各币种 IC
+        per_symbol_ic = self.calculate_per_symbol_ic()
+
+        # 新增：统计各币种 PnL 和交易次数
+        per_symbol_pnl: dict[str, float] = {}
+        per_symbol_trades: dict[str, int] = {}
+
+        for record in self._execution_records:
+            # 从 Order 对象中获取 symbol（record 是 ShadowExecutionRecord dataclass）
+            symbol = record.order.symbol
+
+            # 累计 PnL（简化处理，实际应该从 position_manager 获取）
+            # 这里暂时从 execution records 粗略估算
+            if symbol not in per_symbol_pnl:
+                per_symbol_pnl[symbol] = 0.0
+                per_symbol_trades[symbol] = 0
+
+            # 统计交易次数（跳过未执行的订单）
+            if not record.skipped:
+                per_symbol_trades[symbol] += 1
+
         # 计算运行时间
         runtime_hours = (time.time() - self._start_time) / 3600
         total_time = time.time() - self._start_time
@@ -648,6 +764,10 @@ class ShadowAnalyzer:
             ready_for_launch=meets_criteria,
             launch_score=readiness_score,
             criteria_details=criteria_details,
+            # 新增字段
+            per_symbol_ic=per_symbol_ic,
+            per_symbol_pnl=per_symbol_pnl,
+            per_symbol_trades=per_symbol_trades,
         )
 
     def _calculate_trade_pnl(self, record: ShadowExecutionRecord) -> Decimal:

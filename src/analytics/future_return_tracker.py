@@ -4,6 +4,7 @@
 """
 
 import time
+from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Callable
@@ -59,6 +60,7 @@ class FutureReturnTracker:
         self,
         window_minutes: int,
         update_callback: Callable[[int, float], None],
+        price_history_window_seconds: int = 3600,
     ):
         """
         初始化跟踪器
@@ -66,12 +68,18 @@ class FutureReturnTracker:
         Args:
             window_minutes: 未来收益窗口（分钟）
             update_callback: 收益更新回调函数，签名为 (signal_id, future_return)
+            price_history_window_seconds: 价格历史保留时间（秒），默认 3600（1小时）
         """
         self.window_seconds = window_minutes * 60
         self.update_callback = update_callback
 
         # 待处理的信号队列
         self._pending_signals: list[SignalSnapshot] = []
+
+        # 价格历史存储（按币种分组）
+        # 格式：{symbol: deque[(timestamp, price)]}
+        self._price_history: dict[str, deque] = {}
+        self._price_history_window = price_history_window_seconds
 
         # 统计信息
         self._total_recorded = 0
@@ -80,6 +88,7 @@ class FutureReturnTracker:
         logger.info(
             "future_return_tracker_initialized",
             window_minutes=window_minutes,
+            price_history_window_seconds=price_history_window_seconds,
         )
 
     def record_signal(
@@ -98,16 +107,21 @@ class FutureReturnTracker:
             symbol: 交易对符号
             price: 当前价格
         """
+        current_time = time.time()
+
         snapshot = SignalSnapshot(
             signal_id=signal_id,
             signal_value=signal_value,
-            timestamp=time.time(),
+            timestamp=current_time,
             symbol=symbol,
             price=price,
         )
 
         self._pending_signals.append(snapshot)
         self._total_recorded += 1
+
+        # 记录价格历史（用于测试结束后回填 IC）
+        self._record_price(symbol, price, current_time)
 
         logger.debug(
             "signal_recorded",
@@ -262,4 +276,152 @@ class FutureReturnTracker:
                 if self._total_recorded > 0
                 else 0.0
             ),
+            "price_history_symbols": list(self._price_history.keys()),
+            "price_history_points": sum(
+                len(prices) for prices in self._price_history.values()
+            ),
         }
+
+    def _record_price(self, symbol: str, price: Decimal, timestamp: float) -> None:
+        """
+        记录价格历史（内部方法）
+
+        自动清理超过窗口的旧数据，保持内存可控。
+
+        Args:
+            symbol: 交易对符号
+            price: 价格
+            timestamp: Unix 时间戳（秒）
+        """
+        # 初始化币种的价格历史队列
+        if symbol not in self._price_history:
+            self._price_history[symbol] = deque()
+
+        # 添加新价格点
+        self._price_history[symbol].append((timestamp, price))
+
+        # 清理超过窗口的旧数据
+        cutoff_time = timestamp - self._price_history_window
+        while (
+            self._price_history[symbol]
+            and self._price_history[symbol][0][0] < cutoff_time
+        ):
+            self._price_history[symbol].popleft()
+
+    def _get_price_at_time(
+        self,
+        symbol: str,
+        target_time: float,
+        tolerance_seconds: float = 30.0,
+    ) -> Decimal | None:
+        """
+        获取指定时间点的价格（使用最近邻插值）
+
+        Args:
+            symbol: 交易对符号
+            target_time: 目标时间（Unix 时间戳，秒）
+            tolerance_seconds: 容忍时间差（秒），超过此值返回 None
+
+        Returns:
+            Decimal | None: 最接近的价格，如果无法找到则返回 None
+        """
+        if symbol not in self._price_history:
+            return None
+
+        # 查找最接近的价格
+        closest_price = None
+        min_diff = float("inf")
+
+        for timestamp, price in self._price_history[symbol]:
+            diff = abs(timestamp - target_time)
+            if diff < min_diff and diff <= tolerance_seconds:
+                min_diff = diff
+                closest_price = price
+
+        if closest_price is not None:
+            logger.debug(
+                "price_found_at_time",
+                symbol=symbol,
+                target_time=target_time,
+                found_time_diff=min_diff,
+                price=float(closest_price),
+            )
+
+        return closest_price
+
+    def backfill_future_returns(
+        self, window_minutes_list: list[int]
+    ) -> dict[int, dict[int, float]]:
+        """
+        测试结束后回填计算多窗口未来收益
+
+        使用存储的价格历史，对所有信号计算多个时间窗口的未来收益。
+        这样可以在测试结束后验证不同窗口下的信号质量（IC）。
+
+        Args:
+            window_minutes_list: 时间窗口列表（分钟），如 [5, 10, 15, 30]
+
+        Returns:
+            dict: {signal_id: {window_minutes: future_return}}
+                 例如：{1: {5: 0.001, 10: 0.002, 15: 0.003}}
+        """
+        results: dict[int, dict[int, float]] = {}
+
+        # 处理所有信号（包括已处理和未处理的）
+        all_signals = list(self._pending_signals)
+
+        logger.info(
+            "starting_backfill",
+            total_signals=len(all_signals),
+            windows=window_minutes_list,
+        )
+
+        success_count = 0
+        missing_price_count = 0
+
+        for snapshot in all_signals:
+            signal_id = snapshot.signal_id
+            results[signal_id] = {}
+
+            for window_minutes in window_minutes_list:
+                # 计算目标时间
+                target_time = snapshot.timestamp + (window_minutes * 60)
+
+                # 查找最接近目标时间的价格
+                future_price = self._get_price_at_time(
+                    snapshot.symbol, target_time, tolerance_seconds=60.0
+                )
+
+                if future_price is not None:
+                    # 计算方向性收益
+                    future_return = self._calculate_directional_return(
+                        old_price=snapshot.price,
+                        new_price=future_price,
+                        signal_value=snapshot.signal_value,
+                    )
+                    results[signal_id][window_minutes] = future_return
+                    success_count += 1
+                else:
+                    # 价格不可用
+                    missing_price_count += 1
+                    logger.warning(
+                        "backfill_price_unavailable",
+                        signal_id=signal_id,
+                        symbol=snapshot.symbol,
+                        target_time=target_time,
+                        window_minutes=window_minutes,
+                    )
+
+        logger.info(
+            "backfill_completed",
+            total_signals=len(all_signals),
+            total_calculations=len(all_signals) * len(window_minutes_list),
+            successful=success_count,
+            missing_prices=missing_price_count,
+            success_rate=success_count
+            / (len(all_signals) * len(window_minutes_list))
+            if len(all_signals) > 0
+            else 0.0,
+        )
+
+        return results

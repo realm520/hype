@@ -309,6 +309,7 @@ class ShadowTradingEngine:
             # 记录信号到分析器（用于 IC 计算）
             signal_id = self.analyzer.record_signal(
                 signal=signal_score,
+                symbol=symbol,  # 币种符号，用于分币种 IC 计算
                 future_return=None,  # 将由 future_return_tracker 异步更新
             )
 
@@ -455,6 +456,70 @@ class ShadowTradingEngine:
         try:
             logger.info("generating_final_report")
 
+            # 回填未来收益（用于多窗口 IC 验证）
+            logger.info("backfilling_future_returns_for_ic_validation")
+
+            # 根据测试时长动态选择回填窗口
+            test_duration_minutes = self.config["shadow_mode"]["duration_hours"] * 60
+            max_window = int(test_duration_minutes * 0.8)  # 留 20% 余量
+            available_windows = [5, 10, 15, 30]
+            backfill_windows = [w for w in available_windows if w <= max_window]
+
+            logger.info(
+                "backfill_windows_selected",
+                test_duration_minutes=test_duration_minutes,
+                max_window=max_window,
+                available_windows=available_windows,
+                selected_windows=backfill_windows,
+            )
+
+            if not backfill_windows:
+                logger.warning(
+                    "no_valid_backfill_windows",
+                    test_duration_minutes=test_duration_minutes,
+                    min_required=min(available_windows),
+                )
+                backfill_results = {}
+            else:
+                backfill_results = self.future_return_tracker.backfill_future_returns(
+                    backfill_windows
+                )
+
+            # 计算并记录多窗口 IC
+            if backfill_results:
+                logger.info(
+                    "backfill_multi_window_ic_summary",
+                    total_signals=len(backfill_results),
+                    windows=backfill_windows,
+                )
+
+                # 批量更新 analyzer 中的 future_return（修复 IC 计算）
+                primary_window = backfill_windows[0]  # 使用第一个窗口作为主窗口
+                updated_count = 0
+
+                for signal_id, window_returns in backfill_results.items():
+                    if primary_window in window_returns:
+                        try:
+                            self.analyzer.update_signal_future_return(
+                                signal_id,
+                                window_returns[primary_window]
+                            )
+                            updated_count += 1
+                        except Exception as e:
+                            logger.error(
+                                "backfill_update_failed",
+                                signal_id=signal_id,
+                                error=str(e),
+                            )
+
+                logger.info(
+                    "backfill_results_applied",
+                    updated_signals=updated_count,
+                    primary_window=primary_window,
+                    total_backfilled=len(backfill_results),
+                    success_rate=updated_count / len(backfill_results) if backfill_results else 0,
+                )
+
             # 生成报告
             report = self.analyzer.generate_report()
 
@@ -529,6 +594,27 @@ class ShadowTradingEngine:
         )
         lines.append(f"- **样本数**: {report.signal_quality.sample_size}\n")
 
+        # 新增：各币种 IC 表格
+        if report.per_symbol_ic:
+            lines.append("\n### 1.1 各币种 IC 表现\n")
+            lines.append("| 币种 | IC | P值 | 样本数 | Top 20% | Bottom 20% | 状态 |\n")
+            lines.append("|------|-----|-----|--------|---------|-----------|------|\n")
+            for symbol in sorted(report.per_symbol_ic.keys()):
+                metrics = report.per_symbol_ic[symbol]
+                # 状态判断
+                if metrics.ic >= 0.03:
+                    status = "✅"
+                elif metrics.ic >= 0:
+                    status = "⚠️"
+                else:
+                    status = "❌"
+                lines.append(
+                    f"| {symbol} | {metrics.ic:.4f} | {metrics.ic_p_value:.4f} | "
+                    f"{metrics.sample_size} | {metrics.top_quintile_return:.4f} | "
+                    f"{metrics.bottom_quintile_return:.4f} | {status} |\n"
+                )
+            lines.append("\n")
+
         # 执行效率
         lines.append("\n## 2. 执行效率\n")
         lines.append(
@@ -564,6 +650,18 @@ class ShadowTradingEngine:
             lines.append(f"- **胜率**: {report.pnl_attribution.win_rate:.1f}%\n")
         else:
             lines.append(f"- **胜率**: N/A (需要完整持仓追踪系统)\n")
+
+        # 新增：各币种交易统计
+        if report.per_symbol_trades:
+            lines.append("\n### 3.1 各币种交易统计\n")
+            lines.append("| 币种 | 交易次数 | 占比 |\n")
+            lines.append("|------|----------|------|\n")
+            total_trades = sum(report.per_symbol_trades.values())
+            for symbol in sorted(report.per_symbol_trades.keys()):
+                trades = report.per_symbol_trades[symbol]
+                pct = (trades / total_trades * 100) if total_trades > 0 else 0
+                lines.append(f"| {symbol} | {trades} | {pct:.1f}% |\n")
+            lines.append("\n")
 
         # 风控表现
         lines.append("\n## 4. 风控表现\n")
