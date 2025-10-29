@@ -1,0 +1,128 @@
+# Week 1.5 混合策略配置文件
+# Maker/Taker 混合执行策略 - 降低成本提高盈利性
+
+strategy:
+  name: "week1.5_hybrid"
+  type: "maker_taker_hybrid"
+  description: "浅被动 Maker + IOC 回退混合策略"
+
+# 信号分类器配置
+signal_classifier:
+  # 阈值定义（基于信号分布分位数）
+  theta_1: 0.45  # HIGH 置信度阈值（Top 10%，目标 >0.45）
+  theta_2: 0.25  # MEDIUM 置信度阈值（Top 30%，目标 >0.25）
+
+  # 阈值校准
+  auto_calibrate: true  # 是否自动校准阈值
+  calibration_window: 1000  # 校准窗口大小（历史信号数量）
+  calibration_interval: 3600  # 校准间隔（秒，1小时）
+
+  # 分位数目标
+  high_percentile: 0.90  # HIGH 置信度目标分位数（Top 10%）
+  medium_percentile: 0.70  # MEDIUM 置信度目标分位数（Top 30%）
+
+# 浅被动 Maker 执行器配置
+shallow_maker:
+  # 价格策略
+  tick_offset: 0.1  # 价格偏移量（tick），BTC/ETH 标准
+  use_post_only: true  # 确保成为 Maker（防止立即成交）
+
+  # 超时配置
+  timeout_high: 5.0  # HIGH 置信度超时（秒）
+  timeout_medium: 3.0  # MEDIUM 置信度超时（秒）
+
+  # 订单大小
+  default_size: 0.01  # 默认订单大小（BTC/ETH）
+
+  # 成交监控
+  check_interval: 0.1  # 订单状态查询间隔（秒）
+
+# IOC 回退配置
+ioc_fallback:
+  enabled: true  # 是否启用 IOC 回退
+
+  # 回退条件
+  fallback_on_high_only: true  # 仅 HIGH 置信度超时后回退 IOC
+  fallback_on_medium: false  # MEDIUM 置信度超时后不回退（直接跳过）
+
+  # IOC 参数
+  max_slippage_bps: 25  # 最大滑点（基点）
+  price_adjustment_bps: 10  # 价格调整（基点，提高成交概率）
+
+  # 订单大小
+  use_same_size: true  # 使用与 Maker 相同的订单大小
+
+# 成交率监控配置
+maker_fill_rate_monitor:
+  # 滑动窗口配置
+  window_size: 100  # 统计窗口大小（最近 N 次尝试）
+
+  # 健康度阈值
+  alert_threshold_high: 0.80  # HIGH 置信度成交率告警阈值
+  alert_threshold_medium: 0.75  # MEDIUM 置信度成交率告警阈值
+  critical_threshold: 0.60  # 严重告警阈值（触发风控）
+
+  # 统计间隔
+  report_interval: 60  # 统计报告间隔（秒）
+
+# 动态成本估计配置
+dynamic_cost_estimator:
+  # 成本参数
+  maker_cost_bps: 3.5  # Maker 单边成本（1.5 fee + 1.0 slip + 1.0 impact）
+  taker_cost_bps: 7.5  # Taker 单边成本（4.5 fee + 2.0 slip + 1.0 impact）
+
+  # 更新配置
+  update_interval: 10  # 更新间隔（每 N 次交易）
+  moving_average_window: 50  # 移动平均窗口大小
+
+  # 告警配置
+  alert_on_cost_increase: true  # 成本增加时告警
+  cost_increase_threshold: 0.15  # 成本增加阈值（15%）
+
+# 信号权重配置
+signals:
+  weights:
+    obi: 1.0  # Order Book Imbalance
+    microprice: 1.0  # Microprice
+    impact: 0.5  # 冲击信号（权重较小）
+
+  # 信号验证
+  min_signal_quality: 0.03  # 最小 IC 要求（Spearman 相关性）
+  validate_interval: 3600  # 验证间隔（秒，1小时）
+
+# 风控配置
+risk:
+  # 硬熔断（立即停机）
+  max_single_loss_pct: 0.008  # 单笔最大亏损（0.8% 净值）
+  max_daily_drawdown_pct: 0.05  # 日最大回撤（5%）
+
+  # 仓位管理
+  max_position_size: 0.1  # 最大单品种仓位（BTC）
+  max_total_exposure: 0.3  # 最大总敞口
+
+  # API 异常
+  api_error_threshold: 5  # API 连续错误次数阈值
+  api_timeout_seconds: 5.0  # API 超时时间
+
+# 性能监控配置
+monitoring:
+  # 延迟监控
+  target_latency_ms: 100  # 目标延迟（毫秒）
+  max_latency_ms: 150  # 最大延迟告警阈值
+
+  # PnL 归因
+  alpha_target_pct: 0.70  # Alpha 占比目标（≥70%）
+  cost_target_pct: 0.25  # 成本占比目标（≤25%）
+
+  # 日志级别
+  log_level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+  enable_audit_log: true  # 是否启用审计日志
+
+# 回测配置（可选）
+backtest:
+  enabled: false
+  data_path: "data/market_data/"
+  start_date: "2025-10-20"
+  end_date: "2025-10-27"
+  initial_nav: 100000
+  symbols: ["BTC", "ETH"]
