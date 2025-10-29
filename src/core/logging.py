@@ -35,19 +35,32 @@ def setup_logging(
     log_level = os.getenv("LOG_LEVEL", log_level or "INFO").upper()
     log_dir = os.getenv("LOG_DIR", log_dir or "logs")
     retention_days = int(os.getenv("LOG_RETENTION_DAYS", str(retention_days)))
-    enable_audit_env = os.getenv("ENABLE_AUDIT_LOG", "true").lower()
-    enable_audit = enable_audit_env in ("true", "1", "yes") if enable_audit_env else enable_audit
+    # 只有当环境变量存在时才覆盖参数（否则使用参数默认值）
+    enable_audit_env = os.getenv("ENABLE_AUDIT_LOG")
+    if enable_audit_env is not None:
+        enable_audit = enable_audit_env.lower() in ("true", "1", "yes")
 
     # 创建日志目录
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
     # 配置标准库 logging（structlog 底层依赖）
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, log_level),
+    # 注意：不使用 basicConfig()，因为它只在首次调用时生效
+    # 在测试环境中 isolated_logging fixture 会清空处理器，导致 basicConfig 无效
+    # 因此直接操作 root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level))
+
+    # 确保有控制台处理器
+    has_console_handler = any(
+        isinstance(h, logging.StreamHandler) and h.stream == sys.stdout
+        for h in root_logger.handlers
     )
+    if not has_console_handler:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        console_handler.setLevel(getattr(logging, log_level))
+        root_logger.addHandler(console_handler)
 
     # 配置文件日志处理器（JSON 格式）
     file_handler = logging.handlers.TimedRotatingFileHandler(
@@ -60,8 +73,7 @@ def setup_logging(
     file_handler.suffix = "%Y%m%d"  # 文件后缀：trading.log.20251026
     file_handler.setLevel(getattr(logging, log_level))
 
-    # 获取 root logger 并添加文件处理器
-    root_logger = logging.getLogger()
+    # 添加文件处理器到 root logger
     root_logger.addHandler(file_handler)
 
     # 配置 structlog

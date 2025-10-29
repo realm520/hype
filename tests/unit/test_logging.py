@@ -75,9 +75,9 @@ class TestLoggingSetup:
 class TestLogging:
     """日志记录功能测试"""
 
-    def test_logger_info_message(self, tmp_path):
+    def test_logger_info_message(self, tmp_path, isolated_logging):
         """测试 INFO 级别日志"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志环境
         setup_logging(log_dir=str(log_dir), enable_audit=False)
 
         logger = get_logger(__name__)
@@ -130,9 +130,9 @@ class TestLogging:
             assert "test_error" in content
             assert "test_error_message" in content
 
-    def test_json_format_in_file(self, tmp_path):
+    def test_json_format_in_file(self, tmp_path, isolated_logging):
         """测试日志文件使用 JSON 格式"""
-        log_dir = tmp_path / "test_logs"
+        log_dir = isolated_logging  # 使用隔离的日志环境
         setup_logging(log_dir=str(log_dir), enable_audit=False)
 
         logger = get_logger(__name__)
@@ -238,9 +238,11 @@ class TestAuditLogging:
             assert log_data["side"] == "BUY"
             assert log_data["size"] == 0.1
 
-    def test_disable_audit_logging(self, tmp_path, isolated_logging):
+    def test_disable_audit_logging(self, tmp_path, isolated_logging, monkeypatch):
         """测试禁用审计日志"""
         log_dir = isolated_logging  # 使用隔离的日志目录
+        # 清除环境变量，确保不会覆盖参数
+        monkeypatch.delenv("ENABLE_AUDIT_LOG", raising=False)
         setup_logging(log_dir=str(log_dir), enable_audit=False)
 
         # 强制刷新所有处理器

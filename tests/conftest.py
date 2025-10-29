@@ -386,6 +386,7 @@ def isolated_logging(tmp_path, monkeypatch):
     4. 测试结束后清理
     """
     import logging
+
     import structlog
 
     # 强制关闭所有日志处理器（彻底清理）
