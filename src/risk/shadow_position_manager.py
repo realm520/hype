@@ -4,6 +4,7 @@
 与 PositionManager 接口一致，方便切换到真实交易。
 """
 
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -11,6 +12,7 @@ import structlog
 
 from src.core.types import OrderSide, OrderStatus
 from src.execution.shadow_executor import ShadowExecutionRecord
+from src.risk.position_lifecycle import ClosedPosition, PositionLifecycleTracker
 
 logger = structlog.get_logger()
 
@@ -25,6 +27,8 @@ class ShadowPosition:
     current_price: Decimal  # 当前价格
     unrealized_pnl: Decimal  # 未实现盈亏
     realized_pnl: Decimal  # 已实现盈亏
+    open_timestamp: int = 0  # 开仓时间戳（毫秒）
+    side: OrderSide | None = None  # 持仓方向（BUY=多头，SELL=空头）
 
     @property
     def position_value_usd(self) -> Decimal:
@@ -47,7 +51,7 @@ class ShadowPosition:
         return self.size == 0
 
 
-class ShadowPositionManager:
+class ShadowPositionManager(PositionLifecycleTracker):
     """影子持仓管理器
 
     职责：
@@ -55,12 +59,16 @@ class ShadowPositionManager:
         2. 计算未实现盈亏（基于当前市场价格）
         3. 计算已实现盈亏（平仓时）
         4. 提供持仓查询接口
+        5. 记录持仓生命周期（开仓 → 平仓）
 
     与 PositionManager 接口一致，方便切换到真实交易。
+    继承 PositionLifecycleTracker，提供胜率/盈亏比追踪。
     """
 
     def __init__(self) -> None:
         """初始化影子持仓管理器"""
+        super().__init__()  # 初始化生命周期追踪器
+
         # symbol -> ShadowPosition
         self._positions: dict[str, ShadowPosition] = {}
 
@@ -105,6 +113,8 @@ class ShadowPositionManager:
                 current_price=actual_price,
                 unrealized_pnl=Decimal("0"),
                 realized_pnl=Decimal("0"),
+                open_timestamp=int(time.time() * 1000),  # 毫秒时间戳
+                side=None,
             )
 
         position = self._positions[order.symbol]
@@ -113,6 +123,11 @@ class ShadowPositionManager:
         old_size = position.size
         trade_size = fill_size if order.side == OrderSide.BUY else -fill_size
         new_size = old_size + trade_size
+
+        # 首次开仓（从 0 到非 0）
+        if old_size == 0 and new_size != 0:
+            position.side = OrderSide.BUY if new_size > 0 else OrderSide.SELL
+            position.open_timestamp = int(time.time() * 1000)
 
         # 计算已实现盈亏（如果是平仓交易）
         if (old_size > 0 and trade_size < 0) or (old_size < 0 and trade_size > 0):
@@ -138,9 +153,25 @@ class ShadowPositionManager:
 
         # 更新持仓和开仓价
         if new_size == 0:
-            # 完全平仓
+            # 完全平仓 - 记录闭仓
+            if position.side is not None and old_size != 0:
+                # 记录闭仓到生命周期追踪器
+                closed_position = ClosedPosition(
+                    symbol=order.symbol,
+                    side=position.side,
+                    entry_price=position.entry_price,
+                    exit_price=actual_price,
+                    size=abs(old_size),
+                    realized_pnl=position.realized_pnl,
+                    open_timestamp=position.open_timestamp,
+                    close_timestamp=int(time.time() * 1000),  # 毫秒时间戳
+                )
+                self.record_closed_position(closed_position)
+
             position.size = Decimal("0")
             position.entry_price = Decimal("0")
+            position.side = None
+            position.open_timestamp = 0
         elif (old_size > 0 and new_size > 0 and trade_size > 0) or (
             old_size < 0 and new_size < 0 and trade_size < 0
         ):
@@ -150,14 +181,17 @@ class ShadowPositionManager:
             ) * actual_price
             position.entry_price = total_cost / abs(new_size)
             position.size = new_size
+            # 保持 side 和 open_timestamp
         elif (old_size > 0 and new_size > 0) or (old_size < 0 and new_size < 0):
             # 部分平仓（保持 entry_price 不变）
             position.size = new_size
-            # entry_price 保持不变
+            # entry_price, side, open_timestamp 保持不变
         else:
-            # 反向开仓
+            # 反向开仓（新持仓）
             position.size = new_size
             position.entry_price = actual_price
+            position.side = OrderSide.BUY if new_size > 0 else OrderSide.SELL
+            position.open_timestamp = int(time.time() * 1000)
 
         position.current_price = actual_price
 

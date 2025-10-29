@@ -72,7 +72,8 @@ class PnLAttribution:
     alpha_percentage: float  # Alpha 占比 (%)
     cost_percentage: float  # 成本占比 (%)
     num_trades: int
-    win_rate: float | None  # 胜率 (%)，暂时禁用（需要完整持仓追踪系统）
+    win_rate: float  # 胜率 (%)，目标 ≥ 60%
+    profit_loss_ratio: float  # 盈亏比，目标 ≥ 1.5
 
 
 @dataclass
@@ -600,9 +601,9 @@ class ShadowAnalyzer:
 
     def _calculate_sharpe_ratio(self) -> float:
         """计算年化夏普比率
-        
+
         夏普比率 = (平均收益率 - 无风险利率) / 收益率标准差 × √(年化因子)
-        
+
         Returns:
             年化夏普比率，无足够数据时返回 0.0
         """
@@ -655,7 +656,6 @@ class ShadowAnalyzer:
         fee_total = Decimal("0")
         slippage_total = Decimal("0")
         num_trades = 0
-        # wins = 0  # 暂时禁用胜率统计（需要完整持仓追踪系统）
 
         for record in self._execution_records:
             if record.execution_result and not record.skipped:
@@ -670,11 +670,6 @@ class ShadowAnalyzer:
                 # 滑点（负数表示成本）
                 slippage_total -= abs(record.fill_result.slippage) * record.fill_result.filled_size
 
-                # 胜率统计 - 暂时禁用（当前实现不正确，需要完整持仓追踪）
-                # pnl = self._calculate_trade_pnl(record)
-                # if pnl > 0:
-                #     wins += 1
-
         # Alpha = Total PnL - Fee - Slippage
         # (因为 fee_total 和 slippage_total 已经是负数，所以用减法)
         alpha = total_pnl - fee_total - slippage_total
@@ -688,8 +683,9 @@ class ShadowAnalyzer:
             alpha_pct = 0.0
             cost_pct = 0.0
 
-        # win_rate = (wins / num_trades * 100) if num_trades > 0 else 0.0
-        win_rate = None  # 暂时禁用，需要完整持仓追踪系统
+        # 胜率和盈亏比（从持仓管理器获取）
+        win_rate = self.position_manager.calculate_win_rate()
+        profit_loss_ratio = self.position_manager.calculate_profit_loss_ratio()
 
         return PnLAttribution(
             total_pnl=total_pnl,
@@ -700,6 +696,7 @@ class ShadowAnalyzer:
             cost_percentage=cost_pct,
             num_trades=num_trades,
             win_rate=win_rate,
+            profit_loss_ratio=profit_loss_ratio,
         )
 
     def generate_report(self) -> ShadowTradingReport:
