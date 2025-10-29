@@ -406,7 +406,7 @@ class TestOBIPerformance:
         with patch("time.time") as mock_time:
             mock_time.side_effect = [0.0, 0.002]  # 2ms 计算时间
 
-            result = obi_signal.calculate(sample_market_data)
+            _ = obi_signal.calculate(sample_market_data)
 
             # 应该触发性能警告（> 1ms）
             assert mock_logger.warning.called

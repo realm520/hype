@@ -128,21 +128,31 @@ make pre-commit    # format + check + test
 ### 数据获取与验证
 
 ```bash
-# 1. 获取历史数据（用于信号验证）
-python scripts/fetch_historical_data.py \
-    --symbol BTC-USD \
-    --days 30 \
-    --output data/raw/btc_30d.parquet
+# 1. 采集实时市场数据（用于回测/验证）
+python scripts/collect_market_data.py \
+    --symbols BTC ETH \
+    --duration 600 \
+    --output data/market_data/test_10min
 
-# 2. 信号前瞻性验证
+# 特性：
+# - 增量保存（每 1000 条 OR 60 秒）
+# - 防止内存溢出
+# - 支持 Ctrl+C 中断恢复
+# - 输出：L2 订单簿 + 成交数据 + 元数据
+
+# 2. 数据质量分析
+python scripts/analyze_data_quality.py \
+    --data-dir data/market_data/test_10min
+
+# 3. 信号前瞻性验证
 python scripts/validate_signals.py \
-    --data data/raw/btc_30d.parquet \
+    --data data/market_data/test_10min \
     --config config/signals.yaml \
     --output docs/signal_validation_report.html
 
-# 3. 回测 IOC-only 基线
+# 4. 回测 IOC-only 基线
 python scripts/run_week1_baseline.py \
-    --data data/raw/btc_30d.parquet \
+    --data data/market_data/test_10min \
     --config config/week1_ioc.yaml \
     --output docs/baseline_performance.html
 ```
@@ -175,7 +185,11 @@ hype/
 │   ├── core/                     # 基础设施
 │   │   ├── data_feed.py          # WebSocket 数据接入
 │   │   ├── orderbook.py          # 订单簿重建
-│   │   └── types.py              # 核心数据类型
+│   │   ├── types.py              # 核心数据类型
+│   │   ├── data_source.py        # 统一数据源接口（实时/回放）
+│   │   ├── data_replay.py        # 数据回放引擎
+│   │   ├── incremental_saver.py  # 增量保存器（防止内存溢出）
+│   │   └── logging.py            # 结构化日志系统
 │   ├── signals/                  # 信号引擎
 │   │   ├── base.py               # 信号基类
 │   │   ├── obi.py                # Order Book Imbalance
@@ -206,7 +220,8 @@ hype/
 │   ├── week1_ioc.yaml            # Week 1 IOC-only 配置
 │   └── signals.yaml              # 信号参数配置
 ├── scripts/                      # 工具脚本
-│   ├── fetch_historical_data.py  # 历史数据获取
+│   ├── collect_market_data.py    # 实时数据采集器（含增量保存）
+│   ├── analyze_data_quality.py   # 数据质量分析
 │   ├── validate_signals.py       # 信号验证
 │   └── run_week1_baseline.py     # Week 1 基线测试
 ├── data/                         # 数据目录
@@ -232,10 +247,15 @@ hype/
 - `data_feed.py`：WebSocket 连接管理
 - `orderbook.py`：L2 订单簿重建
 - `types.py`：数据模型定义
+- `data_source.py`：统一数据源接口（实时/回放）
+- `data_replay.py`：数据回放引擎（可加速 100x）
+- `incremental_saver.py`：增量保存器（防止内存溢出）
+- `logging.py`：结构化日志系统
 
 **性能要求**：
 - WebSocket 消息处理 < 5ms
 - 订单簿更新延迟 < 5ms
+- 增量保存延迟 < 100ms
 
 #### 2. 信号层（src/signals/）
 

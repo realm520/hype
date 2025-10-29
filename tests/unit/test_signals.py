@@ -133,7 +133,7 @@ class TestImpactSignal:
             mid_price=Decimal("1500.25"),
         )
 
-        old_value = signal.calculate(old_data)
+        _ = signal.calculate(old_data)
 
         # 等待窗口过期
         time.sleep(0.15)
@@ -255,7 +255,7 @@ class TestSignalAggregator:
             },
         }
 
-        aggregator = create_aggregator_from_config(config)
+        _ = create_aggregator_from_config(config)
 
         # 测试不同信号值的置信度分类
         # 注意：这里假设 OBI 可以产生接近给定值的信号

@@ -448,7 +448,7 @@ class TestAggregatorPerformance:
             # 使用 itertools.count 创建无限迭代器，每次递增 6ms
             mock_time.side_effect = itertools.count(0.0, 0.006)
 
-            result = single_signal_aggregator.calculate(sample_market_data)
+            _ = single_signal_aggregator.calculate(sample_market_data)
 
             # 应该触发性能警告（> 5ms）
             assert mock_logger.warning.called

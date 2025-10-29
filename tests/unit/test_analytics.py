@@ -174,15 +174,19 @@ class TestPnLAttribution:
             best_price=Decimal("1498.0"),
         )
 
-        # 预期：
-        # - 价格下跌 -2.0 (1500.0 → 1498.0)
-        # - 买入时价格下跌，raw_pnl = -2.0 × 1 = -2.0
-        # - 信号方向 = +1（看涨），实际方向 = -1（下跌）
-        # - 方向错误 → Alpha = -|-2.0| = -2.0（负 Alpha）
+        # 预期（新的 Alpha 计算）：
+        # - 价格变化：-2.0 (1500.0 → 1498.0)
+        # - 订单方向：BUY，所以 signed_price_change = -2.0（不利）
+        # - Alpha = signal_value × signed_price_change × size
+        #         = 0.6 × (-2.0) × 1.0 = -1.2
+        # - 信号看涨但价格下跌 → 负 Alpha（方向错误）
+        # - Alpha 大小与信号强度成正比
 
         assert result.alpha < 0  # 信号错误应该有负 Alpha
-        assert abs(result.alpha) == Decimal("2.0")  # Alpha 绝对值应该等于价格变化
-        assert result.total_pnl < 0  # 总 PnL 也是负的
+        expected_alpha = Decimal("0.6") * Decimal("-2.0") * Decimal("1.0")
+        assert result.alpha == expected_alpha  # Alpha = signal_value × signed_price_change × size
+        # 注意：total_pnl 可能为正（如果 slippage 足够有利）
+        # 这里只验证 Alpha 计算的正确性
 
     def test_check_alpha_health_pass(self, sample_buy_order):
         """测试 Alpha 健康检查（通过）"""
@@ -307,7 +311,7 @@ class TestMetricsCollector:
         collector = MetricsCollector()
 
         # 少于 10 个样本
-        for i in range(5):
+        for _ in range(5):
             import time
 
             from src.core.types import ConfidenceLevel, SignalScore
@@ -359,7 +363,7 @@ class TestMetricsCollector:
         from src.core.types import ConfidenceLevel, SignalScore
 
         # 添加一些信号
-        for i in range(10):
+        for _ in range(10):
             signal = SignalScore(
                 value=0.6,
                 confidence=ConfidenceLevel.HIGH,

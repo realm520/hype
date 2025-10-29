@@ -214,7 +214,6 @@ class ICRobustnessValidator:
         # 计算信号-收益时间间隔
         # 注意：这里假设 timestamps 是信号生成时间
         # 未来收益应该在信号之后计算
-        time_intervals = []
 
         # 简化检查：确保时间戳单调递增
         is_monotonic = np.all(np.diff(self.timestamps) >= 0)

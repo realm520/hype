@@ -51,7 +51,7 @@ class TestPriceHistoryRecording:
         symbols = ["BTC", "ETH", "SOL"]
         prices = [Decimal("50000"), Decimal("3000"), Decimal("100")]
 
-        for symbol, price in zip(symbols, prices):
+        for symbol, price in zip(symbols, prices, strict=True):
             tracker.record_signal(
                 signal_id=1, signal_value=0.5, symbol=symbol, price=price
             )

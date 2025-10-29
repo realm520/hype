@@ -161,7 +161,6 @@ class ShadowIOCExecutor:
             )
 
             # 模拟订单成交
-            execution_start = time.time()
             orderbook = self._convert_to_orderbook_snapshot(market_data)
             fill_result = self.fill_simulator.simulate_ioc_fill(order, orderbook)
             execution_timestamp = int(time.time() * 1000)

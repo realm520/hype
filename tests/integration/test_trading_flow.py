@@ -71,7 +71,8 @@ class TestTradingFlowIntegration:
             signal_score = engine.signal_aggregator.calculate(imbalanced_market_data)
 
             # 3. 检查信号是否达到执行阈值
-            should_execute = engine.executor.should_execute(signal_score)
+            # (计算但不使用返回值，仅验证不会崩溃)
+            _ = engine.executor.should_execute(signal_score)
 
             # 买单失衡的数据应该产生较强信号
             assert signal_score.value != 0.0
@@ -192,7 +193,7 @@ class TestTradingFlowIntegration:
             )
 
             # 验证指标收集
-            signal_metrics = engine.metrics_collector.get_signal_metrics()
+            _ = engine.metrics_collector.get_signal_metrics()
             execution_metrics = engine.metrics_collector.get_execution_metrics()
 
             # total_signals 只统计有 actual_return 的信号，这里没有提供 actual_return
@@ -429,7 +430,7 @@ class TestConfigurationVariations:
             engine = TradingEngine(aggressive_config)
 
             # 计算信号
-            signal_score = engine.signal_aggregator.calculate(sample_market_data)
+            _ = engine.signal_aggregator.calculate(sample_market_data)
 
             # 低阈值配置下更容易触发执行
             # 验证阈值设置正确
