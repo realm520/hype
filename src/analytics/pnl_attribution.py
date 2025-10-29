@@ -128,29 +128,33 @@ class PnLAttribution:
             rebate = Decimal("0")
 
             # 5. 计算 Alpha（方向性收益）
-            # Alpha 基于实际价格变化和信号方向正确性
-            # 消除循环定义：Alpha 独立于 Total PnL
+            # Alpha 定义：信号预测带来的价值，独立于执行成本
+            #
+            # 核心思想：
+            # - 如果信号预测正确（价格向预期方向移动），Alpha 为正
+            # - 如果信号预测错误（价格反向移动），Alpha 为负
+            # - Alpha 大小与信号强度和价格变化幅度成正比
+            #
+            # 计算公式：
+            # Alpha = signal_value × price_change × position_size
+            # 其中 price_change 考虑订单方向的符号
 
-            # 5.1 计算实际价格变化
-            price_move = actual_fill_price - reference_price
+            # 5.1 计算价格变化（reference → actual_fill）
+            price_change = actual_fill_price - reference_price
 
-            # 5.2 计算原始方向性 PnL
+            # 5.2 根据订单方向调整符号
+            # BUY: 价格上涨有利（正向），下跌不利（负向）
+            # SELL: 价格下跌有利（正向），上涨不利（负向）
             if order.side == OrderSide.BUY:
-                # 买入：价格上涨为正收益
-                raw_pnl = price_move * order.size
+                signed_price_change = price_change
             else:
-                # 卖出：价格下跌为正收益
-                raw_pnl = -price_move * order.size
+                signed_price_change = -price_change
 
-            # 5.3 判断信号方向是否正确
-            signal_direction = 1 if signal_value > 0 else -1
-            actual_direction = 1 if raw_pnl > 0 else -1
-
-            # 5.4 Alpha = 信号正确时的收益，错误时为负
-            if signal_direction == actual_direction:
-                alpha = abs(raw_pnl)  # 方向正确：正 Alpha
-            else:
-                alpha = -abs(raw_pnl)  # 方向错误：负 Alpha
+            # 5.3 计算 Alpha
+            # signal_value ∈ [-1, 1]：信号强度和方向
+            # signed_price_change：价格变化的有利程度
+            # order.size：持仓大小
+            alpha = Decimal(str(signal_value)) * signed_price_change * order.size
 
             # 6. 计算 Total PnL（独立计算，消除循环定义）
             # Total PnL = Alpha + Fee + Slippage + Impact + Rebate
