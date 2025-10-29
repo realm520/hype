@@ -110,7 +110,7 @@ class SystemValidator:
             logger.info(
                 "config_loaded",
                 symbols=self.config.hyperliquid.symbols,
-                use_mainnet=self.config.hyperliquid.use_mainnet,
+                network="mainnet",  # 固定使用 mainnet
                 initial_nav=self.config.initial_nav,
             )
 

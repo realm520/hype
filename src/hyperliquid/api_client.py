@@ -39,9 +39,12 @@ class HyperliquidAPIClient:
         logger.info("initialized_hyperliquid_client", network="mainnet")
 
         # 初始化 SDK Exchange 对象
+        # 需要从私钥创建 LocalAccount 对象
+        from eth_account import Account
+
+        wallet = Account.from_key(private_key)
         self.exchange = HyperliquidExchange(
-            wallet=wallet_address,
-            secret_key=private_key,
+            wallet=wallet,
             base_url=base_url,
         )
 
