@@ -4,7 +4,6 @@
 仅支持 mainnet。
 """
 
-import os
 from collections.abc import Callable
 from typing import Any
 
@@ -202,6 +201,13 @@ class HyperliquidWebSocket:
         # 取消所有订阅
         for key in list(self._subscriptions.keys()):
             await self.unsubscribe(key)
+
+        # 关闭底层 WebSocket 连接
+        try:
+            if hasattr(self.info, 'ws') and self.info.ws:
+                await self.info.ws.close()
+        except Exception as e:
+            logger.warning("websocket_close_warning", error=str(e))
 
         self._connected = False
         logger.info("websocket_closed")

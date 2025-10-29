@@ -61,11 +61,11 @@ class TradingEngine:
         logger.info(
             "trading_engine_initializing",
             symbols=self.symbols,
-            use_mainnet=config.hyperliquid.use_mainnet,
+            network="mainnet",  # 固定使用 mainnet
         )
 
         # 1. 数据层
-        self.ws_client = HyperliquidWebSocket(config.hyperliquid.use_mainnet)
+        self.ws_client = HyperliquidWebSocket()
         self.data_manager = MarketDataManager(self.ws_client)
 
         # 2. 信号层
@@ -94,7 +94,6 @@ class TradingEngine:
         self.api_client = HyperliquidAPIClient(
             wallet_address=config.hyperliquid.wallet_address,
             private_key=config.hyperliquid.private_key,
-            use_mainnet=config.hyperliquid.use_mainnet,
         )
         self.executor = IOCExecutor(self.api_client)
         self.slippage_estimator = SlippageEstimator(

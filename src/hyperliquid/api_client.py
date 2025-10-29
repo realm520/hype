@@ -73,8 +73,6 @@ class HyperliquidAPIClient:
         """
         # 转换参数
         is_buy = side == OrderSide.BUY
-        size_str = str(size)
-        price_str = str(price) if price else None
 
         # 构造订单类型参数
         if order_type == OrderType.IOC:
