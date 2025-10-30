@@ -435,6 +435,150 @@ def create_signal():
     return _create
 
 
+# ==================== Week 2 Phase 2 Fixtures ====================
+
+
+@pytest.fixture
+def mock_tp_sl_manager():
+    """Mock TP/SL Manager"""
+    from unittest.mock import MagicMock
+
+    from src.core.types import Position
+
+    mock = MagicMock()
+
+    # 默认行为：不触发平仓
+    mock.check_position_risk.return_value = (False, "")
+
+    # 提供辅助方法设置触发行为
+    def set_trigger(should_close: bool, reason: str):
+        mock.check_position_risk.return_value = (should_close, reason)
+
+    mock.set_trigger = set_trigger
+
+    return mock
+
+
+@pytest.fixture
+def mock_position_manager():
+    """Mock Position Manager"""
+    from unittest.mock import MagicMock
+
+    from src.core.types import Position
+
+    mock = MagicMock()
+
+    # 默认行为
+    mock.get_position.return_value = None
+    mock.is_position_stale.return_value = False
+    mock.get_position_age_seconds.return_value = 0.0
+
+    # 辅助方法：设置持仓
+    def set_position(position: Position | None):
+        mock.get_position.return_value = position
+
+    # 辅助方法：设置超时状态
+    def set_stale(is_stale: bool, age_seconds: float = 1800.0):
+        mock.is_position_stale.return_value = is_stale
+        mock.get_position_age_seconds.return_value = age_seconds
+
+    mock.set_position = set_position
+    mock.set_stale = set_stale
+
+    return mock
+
+
+@pytest.fixture
+def mock_ioc_executor():
+    """Mock IOC Executor"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.core.types import Order, OrderSide, OrderStatus, OrderType
+
+    mock = MagicMock()
+
+    # 默认成功执行
+    default_order = Order(
+        id="mock_close_001",
+        symbol="ETH",
+        side=OrderSide.SELL,
+        order_type=OrderType.IOC,
+        price=Decimal("1500.0"),
+        size=Decimal("1.0"),
+        filled_size=Decimal("1.0"),
+        status=OrderStatus.FILLED,
+        created_at=int(time.time() * 1000),
+    )
+
+    mock.execute = AsyncMock(return_value=default_order)
+
+    # 辅助方法：设置执行结果
+    def set_execute_result(order: Order | None):
+        mock.execute = AsyncMock(return_value=order)
+
+    mock.set_execute_result = set_execute_result
+
+    return mock
+
+
+@pytest.fixture
+def create_position():
+    """创建持仓的工厂函数"""
+    from src.core.types import Position
+
+    def _create(
+        symbol: str = "ETH",
+        size: float = 1.0,
+        entry_price: float = 1500.0,
+        unrealized_pnl: float = 0.0,
+        open_timestamp: int | None = None,
+    ) -> Position:
+        """
+        创建持仓对象
+
+        Args:
+            symbol: 交易对
+            size: 持仓尺寸（正数=多头，负数=空头）
+            entry_price: 开仓价格
+            unrealized_pnl: 未实现盈亏
+            open_timestamp: 开仓时间戳（默认当前时间）
+        """
+        return Position(
+            symbol=symbol,
+            size=Decimal(str(size)),
+            entry_price=Decimal(str(entry_price)),
+            unrealized_pnl=Decimal(str(unrealized_pnl)),
+            open_timestamp=open_timestamp or int(time.time() * 1000),
+        )
+
+    return _create
+
+
+@pytest.fixture
+def market_data_dict_factory(create_market_data):
+    """创建市场数据字典的工厂函数"""
+
+    def _create(
+        symbols: list[str] = ["ETH", "BTC"],
+        mid_prices: dict[str, float] | None = None,
+    ) -> dict:
+        """
+        创建市场数据字典
+
+        Args:
+            symbols: 交易对列表
+            mid_prices: symbol -> mid_price 映射（可选）
+        """
+        prices = mid_prices or {symbol: 1500.0 + i * 100 for i, symbol in enumerate(symbols)}
+
+        return {
+            symbol: create_market_data(symbol=symbol, mid_price=prices.get(symbol, 1500.0))
+            for symbol in symbols
+        }
+
+    return _create
+
+
 # ==================== 日志系统隔离 Fixtures ====================
 
 
