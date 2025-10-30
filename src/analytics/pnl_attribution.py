@@ -6,11 +6,15 @@
 from collections import deque
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import structlog
 
 from src.core.constants import HYPERLIQUID_TAKER_FEE_RATE
-from src.core.types import Order, OrderSide
+from src.core.types import Order, OrderSide, OrderType
+
+if TYPE_CHECKING:
+    from src.analytics.dynamic_cost_estimator import DynamicCostEstimator
 
 logger = structlog.get_logger()
 
@@ -90,6 +94,7 @@ class PnLAttribution:
         reference_price: Decimal,
         actual_fill_price: Decimal,
         best_price: Decimal,
+        cost_estimator: "DynamicCostEstimator | None" = None,
     ) -> TradeAttribution:
         """
         归因单笔交易
@@ -100,6 +105,9 @@ class PnLAttribution:
             reference_price: 参考价格（信号时刻的中间价）
             actual_fill_price: 实际成交价
             best_price: 最优价格（下单时的最优价）
+            cost_estimator: 动态成本估算器（可选）
+                           - 如果提供,根据 order_type 动态选择 Maker/Taker 费率
+                           - 否则使用固定 Taker 费率（向后兼容）
 
         Returns:
             TradeAttribution: 归因结果
@@ -107,7 +115,19 @@ class PnLAttribution:
         try:
             # 1. 计算 Fee（手续费，负数表示成本）
             trade_value = order.size * actual_fill_price
-            fee = -trade_value * self.fee_rate
+
+            # 动态选择费率（如果提供 cost_estimator）
+            if cost_estimator is not None:
+                # 根据订单类型选择 Maker 或 Taker 费率
+                if order.order_type == OrderType.LIMIT:
+                    fee_rate = cost_estimator.maker_fee_rate
+                else:  # IOC 或其他类型使用 Taker 费率
+                    fee_rate = cost_estimator.taker_fee_rate
+            else:
+                # 向后兼容：使用固定 Taker 费率
+                fee_rate = self.fee_rate
+
+            fee = -trade_value * fee_rate
 
             # 2. 计算 Slippage（滑点，负数表示成本）
             # Slippage = (ExecutionPrice - ReferencePrice) * Size

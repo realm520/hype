@@ -3,9 +3,9 @@
 根据信号评分值对信号进行分级（HIGH/MEDIUM/LOW），用于混合执行策略。
 """
 
+
 import numpy as np
 import structlog
-from typing import Optional
 
 from src.core.types import ConfidenceLevel
 
@@ -23,8 +23,8 @@ class SignalClassifier:
 
     def __init__(
         self,
-        theta_1: Optional[float] = None,
-        theta_2: Optional[float] = None,
+        theta_1: float | None = None,
+        theta_2: float | None = None,
     ):
         """初始化信号分级器
 

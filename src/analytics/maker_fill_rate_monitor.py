@@ -76,7 +76,7 @@ class MakerFillRateMonitor:
         order: Order,
         confidence: ConfidenceLevel,
         filled: bool,
-    ):
+    ) -> None:
         """
         记录一次 Maker 订单尝试
 
@@ -254,7 +254,7 @@ class MakerFillRateMonitor:
 
         return fill_rate < self.critical_threshold
 
-    def reset_statistics(self):
+    def reset_statistics(self) -> None:
         """重置所有统计数据"""
         self._high_window.clear()
         self._medium_window.clear()
@@ -264,7 +264,7 @@ class MakerFillRateMonitor:
 
         logger.info("maker_fill_rate_monitor_reset")
 
-    def _check_alert(self, confidence: ConfidenceLevel):
+    def _check_alert(self, confidence: ConfidenceLevel) -> None:
         """
         检查告警条件（内部方法）
 

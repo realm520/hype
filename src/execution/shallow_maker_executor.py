@@ -159,13 +159,14 @@ class ShallowMakerExecutor:
             )
 
             # 执行浅被动 Maker 订单
+            # TODO: API Client 需要支持 post_only 参数
             order_result = await self.api_client.place_order(
                 symbol=market_data.symbol,
                 side=side,
                 size=order_size,
                 price=order_price,
                 order_type=OrderType.LIMIT,
-                post_only=self.use_post_only,
+                # post_only=self.use_post_only,  # 暂不支持
             )
 
             # 解析订单结果
@@ -269,12 +270,13 @@ class ShallowMakerExecutor:
         while time.time() - start_time < timeout_seconds:
             # 查询订单状态
             try:
+                # TODO: order.id 需要转换为 int（当前 API 接口要求）
                 order_status = await self.api_client.get_order_status(
-                    symbol=symbol, order_id=order.id
+                    order_id=int(order.id) if isinstance(order.id, str) else order.id
                 )
 
                 # 检查是否成交
-                if order_status.get("status") == "filled":
+                if order_status and order_status.get("status") == "filled":
                     # 更新订单对象
                     order.status = OrderStatus.FILLED
                     order.filled_size = Decimal(
@@ -283,7 +285,7 @@ class ShallowMakerExecutor:
                     return order
 
                 # 检查是否被拒绝或取消
-                if order_status.get("status") in ["rejected", "cancelled"]:
+                if order_status and order_status.get("status") in ["rejected", "cancelled"]:
                     return None
 
             except Exception as e:
@@ -299,7 +301,9 @@ class ShallowMakerExecutor:
 
         # 超时，尝试撤单
         try:
-            await self.api_client.cancel_order(symbol=symbol, order_id=order.id)
+            # TODO: order.id 需要转换为 int（当前 API 接口要求）
+            order_id_int = int(order.id) if isinstance(order.id, str) else order.id
+            await self.api_client.cancel_order(symbol=symbol, order_id=order_id_int)
             logger.info(
                 "shallow_maker_order_cancelled_on_timeout",
                 symbol=symbol,

@@ -317,7 +317,7 @@ class HybridExecutor:
             ),
         }
 
-    def reset_statistics(self):
+    def reset_statistics(self) -> None:
         """重置统计数据"""
         for key in self._stats:
             self._stats[key] = 0

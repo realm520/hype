@@ -1,128 +1,232 @@
-# Week 1.5 混合策略配置文件
-# Maker/Taker 混合执行策略 - 降低成本提高盈利性
+# Week 1.5 Maker/Taker 混合策略配置
 
-strategy:
-  name: "week1.5_hybrid"
-  type: "maker_taker_hybrid"
-  description: "浅被动 Maker + IOC 回退混合策略"
+# 继承基础配置
+extends: "base.yaml"
 
-# 信号分类器配置
-signal_classifier:
-  # 阈值定义（基于信号分布分位数）
-  theta_1: 0.45  # HIGH 置信度阈值（Top 10%，目标 >0.45）
-  theta_2: 0.25  # MEDIUM 置信度阈值（Top 30%，目标 >0.25）
+# Week 1.5 特定配置：Maker 优先 + IOC 回退
 
-  # 阈值校准
-  auto_calibrate: true  # 是否自动校准阈值
-  calibration_window: 1000  # 校准窗口大小（历史信号数量）
-  calibration_interval: 3600  # 校准间隔（秒，1小时）
-
-  # 分位数目标
-  high_percentile: 0.90  # HIGH 置信度目标分位数（Top 10%）
-  medium_percentile: 0.70  # MEDIUM 置信度目标分位数（Top 30%）
-
-# 浅被动 Maker 执行器配置
-shallow_maker:
-  # 价格策略
-  tick_offset: 0.1  # 价格偏移量（tick），BTC/ETH 标准
-  use_post_only: true  # 确保成为 Maker（防止立即成交）
-
-  # 超时配置
-  timeout_high: 5.0  # HIGH 置信度超时（秒）
-  timeout_medium: 3.0  # MEDIUM 置信度超时（秒）
-
-  # 订单大小
-  default_size: 0.01  # 默认订单大小（BTC/ETH）
-
-  # 成交监控
-  check_interval: 0.1  # 订单状态查询间隔（秒）
-
-# IOC 回退配置
-ioc_fallback:
-  enabled: true  # 是否启用 IOC 回退
-
-  # 回退条件
-  fallback_on_high_only: true  # 仅 HIGH 置信度超时后回退 IOC
-  fallback_on_medium: false  # MEDIUM 置信度超时后不回退（直接跳过）
-
-  # IOC 参数
-  max_slippage_bps: 25  # 最大滑点（基点）
-  price_adjustment_bps: 10  # 价格调整（基点，提高成交概率）
-
-  # 订单大小
-  use_same_size: true  # 使用与 Maker 相同的订单大小
-
-# 成交率监控配置
-maker_fill_rate_monitor:
-  # 滑动窗口配置
-  window_size: 100  # 统计窗口大小（最近 N 次尝试）
-
-  # 健康度阈值
-  alert_threshold_high: 0.80  # HIGH 置信度成交率告警阈值
-  alert_threshold_medium: 0.75  # MEDIUM 置信度成交率告警阈值
-  critical_threshold: 0.60  # 严重告警阈值（触发风控）
-
-  # 统计间隔
-  report_interval: 60  # 统计报告间隔（秒）
-
-# 动态成本估计配置
-dynamic_cost_estimator:
-  # 成本参数
-  maker_cost_bps: 3.5  # Maker 单边成本（1.5 fee + 1.0 slip + 1.0 impact）
-  taker_cost_bps: 7.5  # Taker 单边成本（4.5 fee + 2.0 slip + 1.0 impact）
-
-  # 更新配置
-  update_interval: 10  # 更新间隔（每 N 次交易）
-  moving_average_window: 50  # 移动平均窗口大小
-
-  # 告警配置
-  alert_on_cost_increase: true  # 成本增加时告警
-  cost_increase_threshold: 0.15  # 成本增加阈值（15%）
-
-# 信号权重配置
+# 信号配置（与 Week 1 相同的 3 个基础信号）
 signals:
-  weights:
-    obi: 1.0  # Order Book Imbalance
-    microprice: 1.0  # Microprice
-    impact: 0.5  # 冲击信号（权重较小）
+  enabled:
+    - obi
+    - microprice
+    - impact
 
-  # 信号验证
-  min_signal_quality: 0.03  # 最小 IC 要求（Spearman 相关性）
-  validate_interval: 3600  # 验证间隔（秒，1小时）
+  # OBI 信号
+  obi:
+    levels: 5  # 档位数
+    weight: 0.4  # 权重
 
-# 风控配置
+  # Microprice 信号
+  microprice:
+    weight: 0.3
+
+  # Impact 信号
+  impact:
+    window_ms: 100  # 窗口（毫秒）
+    weight: 0.3
+
+  # 置信度阈值（Week 1.5 三档分级）
+  thresholds:
+    theta_1: 0.5  # 高置信度：ShallowMaker（5s）→ IOC 回退
+    theta_2: 0.2  # 中置信度：ShallowMaker（3s）→ 不回退
+    # 低于 theta_2：跳过交易
+
+# 执行配置（Week 1.5：混合执行）
+execution:
+  strategy: "hybrid"  # Maker/Taker 混合模式
+
+  # 浅被动 Maker 执行器
+  shallow_maker:
+    enabled: true
+    default_size: 0.01  # 默认订单尺寸（BTC/ETH）
+    tick_offset: 0.1  # 盘口偏移量（+1 tick）
+    post_only: true  # 确保成为 Maker
+    
+    # 分级超时
+    timeout_high: 5.0  # HIGH 置信度超时（秒）
+    timeout_medium: 3.0  # MEDIUM 置信度超时（秒）
+    
+    # 价格策略
+    price_strategy: "shallow_passive"  # 盘口 +1 tick
+    # BUY: best_bid + 0.1
+    # SELL: best_ask - 0.1
+
+  # IOC 执行器（回退用）
+  ioc:
+    enabled: true
+    price_strategy: "aggressive_limit"  # 贴盘口限价
+    max_retries: 0  # 不重试（IOC 特性）
+    
+    # 回退策略
+    fallback_on_high: true  # HIGH 超时后回退 IOC
+    fallback_on_medium: false  # MEDIUM 超时不回退
+
+  # 订单尺寸计算（与 Week 1 相同）
+  sizing:
+    method: "kelly_fraction"  # kelly_fraction | fixed | volatility_scaled
+    kelly_fraction: 0.01  # 1% 仓位
+    max_size_usd: 5000  # 单笔最大 5000 USD
+
+# 风控配置（Week 1.5：保持硬熔断）
 risk:
-  # 硬熔断（立即停机）
-  max_single_loss_pct: 0.008  # 单笔最大亏损（0.8% 净值）
-  max_daily_drawdown_pct: 0.05  # 日最大回撤（5%）
+  # 硬熔断
+  hard_limits:
+    enabled: true
+    max_single_loss_pct: 0.008  # 单笔亏损 0.8%
+    max_daily_drawdown_pct: 0.05  # 日回撤 5%
+    api_health_check_interval: 10.0  # 秒
 
-  # 仓位管理
-  max_position_size: 0.1  # 最大单品种仓位（BTC）
-  max_total_exposure: 0.3  # 最大总敞口
+  # Week 1.5 暂不启用动态风控
+  dynamic:
+    enabled: false
 
-  # API 异常
-  api_error_threshold: 5  # API 连续错误次数阈值
-  api_timeout_seconds: 5.0  # API 超时时间
+# PnL 归因配置（Week 1.5 调整）
+analytics:
+  pnl_attribution:
+    enabled: true
+    components:
+      - alpha  # 方向性收益
+      - fee  # 手续费（Maker: 1.5 bps, Taker: 4.5 bps）
+      - slippage  # 滑点（Maker: 1.0 bps, Taker: 2.0 bps）
+      - impact  # 冲击（1.0 bps）
+      - rebate  # 回扣（Week 1.5 仍为 0）
 
-# 性能监控配置
+    # 健康标准（Week 1.5 调整）
+    health_check:
+      min_alpha_pct: 0.70  # Alpha 至少 70%
+      max_cost_pct: 0.25  # 成本最多 25%（11 bps 混合成本）
+
+# 验证配置（Week 1.5 调整）
+validation:
+  # 信号验证（与 Week 1 相同）
+  signals:
+    min_ic: 0.03  # 最小 IC（Spearman）
+    min_spread_bps: 8  # 最小分层收益（bps）
+
+  # 执行验证（Week 1.5 Maker 指标）
+  execution:
+    # Maker 成交率
+    min_maker_fill_rate_high: 0.80  # HIGH 置信度 ≥ 80%
+    min_maker_fill_rate_medium: 0.75  # MEDIUM 置信度 ≥ 75%
+    
+    # IOC 成交率（回退时）
+    min_ioc_fill_rate: 0.95  # IOC 成交率 ≥ 95%
+    
+    # 回退率
+    max_fallback_rate: 0.20  # 最大回退率 20%
+    
+    # 滑点
+    max_slippage_deviation: 0.20  # 滑点偏差 20%
+
+  # PnL 验证（Week 1.5 调整）
+  pnl:
+    min_sharpe: 1.5  # 最小夏普比率（提高标准）
+    min_win_rate: 0.55  # 最小胜率（降低要求，因为成本降低）
+    min_profit_factor: 1.8  # 最小盈亏比（提高标准）
+
+  # 成本验证（Week 1.5 新增）
+  cost:
+    max_round_trip_cost_bps: 12  # 最大往返成本 12 bps
+    target_round_trip_cost_bps: 11  # 目标往返成本 11 bps
+    min_cost_reduction_pct: 0.25  # 相对 Week 1 最小节省 25%
+
+# 监控配置（Week 1.5 增强）
 monitoring:
   # 延迟监控
-  target_latency_ms: 100  # 目标延迟（毫秒）
-  max_latency_ms: 150  # 最大延迟告警阈值
+  latency:
+    enabled: true
+    targets:
+      ws_processing: 5  # WebSocket 处理 < 5ms
+      orderbook_update: 5  # 订单簿更新 < 5ms
+      signal_calculation: 10  # 信号计算 < 10ms
+      order_submission: 50  # 订单提交 < 50ms
+      maker_fill_check: 100  # Maker 成交检查 < 100ms
+      end_to_end: 150  # 端到端 < 150ms（含 Maker 等待）
 
-  # PnL 归因
-  alpha_target_pct: 0.70  # Alpha 占比目标（≥70%）
-  cost_target_pct: 0.25  # 成本占比目标（≤25%）
+  # Maker 成交率监控（Week 1.5 核心）
+  fill_rate:
+    enabled: true
+    window_size: 100  # 滑动窗口大小（次）
+    
+    # 分级阈值
+    alert_threshold_high: 0.80  # HIGH 置信度告警阈值
+    alert_threshold_medium: 0.75  # MEDIUM 置信度告警阈值
+    critical_threshold: 0.60  # 严重告警阈值（触发风控）
+    
+    # 统计间隔
+    stats_interval: 60  # 统计输出间隔（秒）
 
-  # 日志级别
-  log_level: "INFO"  # DEBUG | INFO | WARNING | ERROR
-  enable_audit_log: true  # 是否启用审计日志
+  # 执行统计监控（Week 1.5 新增）
+  execution_stats:
+    enabled: true
+    track_metrics:
+      - maker_executions  # Maker 执行次数
+      - ioc_executions  # IOC 执行次数
+      - fallback_executions  # 回退执行次数
+      - skipped_signals  # 跳过信号次数
+      - maker_fill_rate  # Maker 成交率
+      - ioc_fill_rate  # IOC 成交率
+      - fallback_rate  # 回退率
+      - skip_rate  # 跳过率
+    
+    report_interval: 300  # 报告间隔（秒）
 
-# 回测配置（可选）
-backtest:
-  enabled: false
-  data_path: "data/market_data/"
-  start_date: "2025-10-20"
-  end_date: "2025-10-27"
-  initial_nav: 100000
-  symbols: ["BTC", "ETH"]
+  # 告警
+  alerts:
+    enabled: true
+    channels:
+      - "log"  # 日志告警（默认）
+      # - "webhook"  # Webhook（可选）
+
+    triggers:
+      # 硬熔断告警
+      - type: "hard_limit"
+        severity: "critical"
+      
+      # API 错误
+      - type: "api_error"
+        severity: "high"
+      
+      # 高延迟
+      - type: "high_latency"
+        threshold_ms: 200  # Week 1.5 放宽（含 Maker 等待）
+        severity: "medium"
+      
+      # Maker 成交率低（Week 1.5 新增）
+      - type: "low_maker_fill_rate"
+        threshold_high: 0.70  # HIGH < 70% 告警
+        threshold_medium: 0.65  # MEDIUM < 65% 告警
+        severity: "high"
+      
+      # 严重成交率低（Week 1.5 新增）
+      - type: "critical_fill_rate"
+        threshold: 0.60  # < 60% 触发风控
+        severity: "critical"
+      
+      # 高回退率（Week 1.5 新增）
+      - type: "high_fallback_rate"
+        threshold: 0.30  # > 30% 告警
+        severity: "medium"
+
+# Week 1.5 特定说明
+notes:
+  strategy: "Maker/Taker 混合策略"
+  
+  key_improvements:
+    - "Maker 优先执行，降低成本从 15 bps 到 11 bps（27% 节省）"
+    - "三档信号分级：HIGH（ShallowMaker + IOC 回退）、MEDIUM（ShallowMaker only）、LOW（跳过）"
+    - "实时成交率监控，严重告警阈值 60%"
+    - "盘口 +1 tick 挂单，提高成交概率同时保持 Maker 费率"
+  
+  cost_structure:
+    maker_open: "3.5 bps (1.5 fee + 1.0 slip + 1.0 impact)"
+    taker_close: "7.5 bps (4.5 fee + 2.0 slip + 1.0 impact)"
+    total: "11 bps (vs Week 1: 15 bps)"
+  
+  targets:
+    maker_fill_rate_high: ">= 80%"
+    maker_fill_rate_medium: ">= 75%"
+    fallback_rate: "<= 20%"
+    sharpe_ratio: ">= 1.5"
+    win_rate: ">= 55%"

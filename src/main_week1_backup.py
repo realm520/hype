@@ -1,6 +1,6 @@
-"""Hyperliquid 混合执行交易引擎
+"""Hyperliquid IOC 交易引擎
 
-Week 1.5 核心策略：Maker/Taker 混合执行 + 信号强度分级 + 成交率监控
+Week 1 核心策略：高置信度信号 + IOC 执行 + 硬限制风控
 """
 
 import asyncio
@@ -10,17 +10,14 @@ from typing import Any
 
 import structlog
 
-from src.analytics.maker_fill_rate_monitor import MakerFillRateMonitor
 from src.analytics.metrics import MetricsCollector
 from src.analytics.pnl_attribution import PnLAttribution
 from src.core.config import Config, load_config
 from src.core.data_feed import MarketDataManager
 from src.core.logging import setup_logging
 from src.core.types import OrderSide
-from src.execution.hybrid_executor import HybridExecutor
 from src.execution.ioc_executor import IOCExecutor
-from src.execution.shallow_maker_executor import ShallowMakerExecutor
-from src.execution.signal_classifier import SignalClassifier
+from src.execution.order_manager import OrderManager
 from src.execution.slippage_estimator import SlippageEstimator
 from src.hyperliquid.api_client import HyperliquidAPIClient
 from src.hyperliquid.websocket_client import HyperliquidWebSocket
@@ -32,22 +29,20 @@ logger = structlog.get_logger()
 
 
 class TradingEngine:
-    """Week 1.5 混合执行交易引擎
+    """Week 1 IOC 交易引擎
 
     架构：
-        数据层 → 信号层 → 分类层 → 执行层 → 风控层 → 分析层
+        数据层 → 信号层 → 执行层 → 风控层 → 分析层
 
     主循环：
         1. 获取市场数据
         2. 计算聚合信号
-        3. 信号强度分级（HIGH/MEDIUM/LOW）
-        4. 风控预检查
-        5. 混合执行（Maker 优先 + IOC 回退）
-        6. 更新持仓
-        7. PnL 归因
-        8. 成交率监控
-        9. 指标记录
-        10. 健康检查
+        3. 风控预检查
+        4. 执行订单（IOC）
+        5. 更新持仓
+        6. PnL 归因
+        7. 指标记录
+        8. 健康检查
     """
 
     def __init__(self, config: Config):
@@ -67,7 +62,6 @@ class TradingEngine:
             "trading_engine_initializing",
             symbols=self.symbols,
             network="mainnet",  # 固定使用 mainnet
-            strategy="week1.5_hybrid_maker_taker",
         )
 
         # 1. 数据层
@@ -96,44 +90,16 @@ class TradingEngine:
         }
         self.signal_aggregator = create_aggregator_from_config(signals_config)
 
-        # 2.5. 信号分类层（Week 1.5 新增）
-        self.signal_classifier = SignalClassifier(
-            theta_1=config.signals.thresholds.theta_1,
-            theta_2=config.signals.thresholds.theta_2,
-        )
-
-        # 3. 执行层（Week 1.5 混合执行）
+        # 3. 执行层
         self.api_client = HyperliquidAPIClient(
             wallet_address=config.hyperliquid.wallet_address,
             private_key=config.hyperliquid.private_key,
         )
-
-        # IOC 执行器（用于回退）
-        self.ioc_executor = IOCExecutor(self.api_client)
-
-        # 浅被动 Maker 执行器
-        # 注意：ExecutionConfig 不包含 default_size，使用固定值 0.01
-        self.shallow_maker = ShallowMakerExecutor(
-            api_client=self.api_client,
-            default_size=Decimal("0.01"),  # Week 1.5 默认订单尺寸
-            timeout_high=5.0,  # HIGH 置信度超时 5 秒
-            timeout_medium=3.0,  # MEDIUM 置信度超时 3 秒
-            tick_offset=Decimal("0.1"),  # BTC/ETH 标准 tick
-            use_post_only=True,  # 确保成为 Maker
-        )
-
-        # 混合执行协调器
-        self.executor = HybridExecutor(
-            shallow_maker_executor=self.shallow_maker,
-            ioc_executor=self.ioc_executor,
-            enable_fallback=True,  # 启用 IOC 回退
-            fallback_on_medium=False,  # MEDIUM 超时不回退
-        )
-
-        # 滑点估计器（仍用于分析）
+        self.executor = IOCExecutor(self.api_client)
         self.slippage_estimator = SlippageEstimator(
             max_slippage_bps=config.execution.max_slippage_bps
         )
+        self.order_manager = OrderManager(self.executor, self.slippage_estimator)
 
         # 4. 风控层
         self.hard_limits = HardLimits(
@@ -148,26 +114,7 @@ class TradingEngine:
         self.pnl_attribution = PnLAttribution()
         self.metrics_collector = MetricsCollector()
 
-        # 5.5. 成交率监控（Week 1.5 新增）
-        self.fill_rate_monitor = MakerFillRateMonitor(
-            window_size=100,  # 最近 100 次尝试
-            alert_threshold_high=0.80,  # HIGH 置信度目标 80%
-            alert_threshold_medium=0.75,  # MEDIUM 置信度目标 75%
-            critical_threshold=0.60,  # 严重告警阈值 60%
-        )
-
-        logger.info(
-            "trading_engine_initialized",
-            signal_classifier_thresholds={
-                "theta_1": config.signals.thresholds.theta_1,
-                "theta_2": config.signals.thresholds.theta_2,
-            },
-            maker_timeouts={"high": 5.0, "medium": 3.0},
-            fallback_config={
-                "enable_fallback": True,
-                "fallback_on_medium": False,
-            },
-        )
+        logger.info("trading_engine_initialized")
 
     async def start(self) -> None:
         """启动交易引擎"""
@@ -239,21 +186,14 @@ class TradingEngine:
             # 2. 计算聚合信号
             signal_score = self.signal_aggregator.calculate(market_data)
 
-            # 3. 信号强度分级（Week 1.5 新增）
-            confidence_level = self.signal_classifier.classify(signal_score.value)
-            # 更新 signal_score 的置信度
-            from dataclasses import replace
-
-            signal_score = replace(signal_score, confidence=confidence_level)
-
             # 记录信号
             self.metrics_collector.record_signal(signal_score, symbol)
 
-            # 4. 判断是否执行（基于置信度）
-            if signal_score.value == 0:
+            # 3. 判断是否执行
+            if not self.executor.should_execute(signal_score):
                 return
 
-            # 5. 风控预检查
+            # 4. 风控预检查
             current_position = self.position_manager.get_position(symbol)
             current_position_value = (
                 current_position.position_value_usd if current_position else Decimal("0")
@@ -262,20 +202,21 @@ class TradingEngine:
             # 创建模拟订单进行风控检查
             from src.core.types import Order, OrderStatus, OrderType
 
-            side = self._determine_side(signal_score.value)
+            side = (
+                self._determine_side(signal_score.value)
+                if signal_score.value != 0
+                else None
+            )
             if not side:
                 return
-
-            # 估算订单尺寸（使用默认尺寸）
-            order_size = self.shallow_maker.default_size
 
             test_order = Order(
                 id="test",
                 symbol=symbol,
                 side=side,
-                order_type=OrderType.LIMIT,  # Week 1.5 默认使用限价单
+                order_type=OrderType.IOC,
                 price=market_data.mid_price,
-                size=order_size,
+                size=self.executor.default_size,
                 filled_size=Decimal("0"),
                 status=OrderStatus.PENDING,
                 created_at=market_data.timestamp,
@@ -290,57 +231,21 @@ class TradingEngine:
                     "order_rejected_by_risk_control",
                     symbol=symbol,
                     reason=reject_reason,
-                    confidence=signal_score.confidence.name,
                 )
                 return
 
-            # 6. 混合执行（Week 1.5 核心逻辑）
-            order = await self.executor.execute(
-                signal_score=signal_score,
-                market_data=market_data,
-                size=order_size,
+            # 5. 执行订单
+            order = await self.order_manager.execute_signal(
+                signal_score, market_data, size=self.executor.default_size
             )
-
-            # 7. 记录成交率（无论是否成交）
-            if signal_score.confidence.name in ["HIGH", "MEDIUM"]:
-                from src.core.types import ConfidenceLevel
-
-                confidence_enum = ConfidenceLevel[signal_score.confidence.name]
-
-                # 创建一个订单对象用于记录
-                if order is not None:
-                    # 成交：使用实际订单
-                    self.fill_rate_monitor.record_maker_attempt(
-                        order=order,
-                        confidence=confidence_enum,
-                        filled=True,
-                    )
-                else:
-                    # 未成交：创建临时订单对象
-                    dummy_order = Order(
-                        id="unfilled",
-                        symbol=symbol,
-                        side=side,
-                        order_type=OrderType.LIMIT,
-                        price=market_data.mid_price,
-                        size=order_size,
-                        filled_size=Decimal("0"),
-                        status=OrderStatus.CANCELLED,
-                        created_at=market_data.timestamp,
-                    )
-                    self.fill_rate_monitor.record_maker_attempt(
-                        order=dummy_order,
-                        confidence=confidence_enum,
-                        filled=False,
-                    )
 
             if not order:
                 return
 
-            # 8. 更新持仓
+            # 6. 更新持仓
             self.position_manager.update_from_order(order, order.price)
 
-            # 9. PnL 归因
+            # 7. PnL 归因
             attribution = self.pnl_attribution.attribute_trade(
                 order=order,
                 signal_value=signal_score.value,
@@ -354,7 +259,7 @@ class TradingEngine:
             # 更新风控净值
             self.hard_limits.update_pnl(attribution.total_pnl)
 
-            # 10. 记录执行指标
+            # 8. 记录执行指标
             slippage_bps = self.slippage_estimator.calculate_actual_slippage(
                 order.price, market_data.mid_price, order.side
             )
@@ -367,8 +272,6 @@ class TradingEngine:
                 symbol=symbol,
                 order_id=order.id,
                 side=order.side.name,
-                order_type=order.order_type.name,
-                confidence=signal_score.confidence.name,
                 size=float(order.size),
                 pnl=float(attribution.total_pnl),
                 alpha_pct=attribution.alpha_percentage,
@@ -414,57 +317,17 @@ class TradingEngine:
             self._running = False  # 停止交易
             return
 
-        # 3. 成交率监控（Week 1.5 新增）
-        fill_rate_stats = self.fill_rate_monitor.get_statistics()
-
-        # 检查成交率健康状态
-        from src.core.types import ConfidenceLevel
-
-        high_healthy = self.fill_rate_monitor.is_healthy(ConfidenceLevel.HIGH)
-        medium_healthy = self.fill_rate_monitor.is_healthy(ConfidenceLevel.MEDIUM)
-
-        # 检查是否触发严重告警
-        high_critical = self.fill_rate_monitor.is_critical(ConfidenceLevel.HIGH)
-        medium_critical = self.fill_rate_monitor.is_critical(ConfidenceLevel.MEDIUM)
-
-        if high_critical or medium_critical:
-            logger.critical(
-                "maker_fill_rate_critical",
-                high_fill_rate=fill_rate_stats["high"]["window_fill_rate"],
-                medium_fill_rate=fill_rate_stats["medium"]["window_fill_rate"],
-                action="consider_strategy_adjustment",
-            )
-
-        # 4. 执行统计（Week 1.5 新增）
-        executor_stats = self.executor.get_statistics()
-
-        # 5. 生成报告
+        # 3. 生成报告
         pnl_report = self.pnl_attribution.get_attribution_report()
         metrics_summary = self.metrics_collector.get_metrics_summary(risk_status)
 
         logger.info(
             "health_check_completed",
-            # Alpha 健康
             alpha_healthy=is_healthy,
             alpha_pct=pnl_report["percentages"]["alpha"],
-            # 信号质量
             ic=metrics_summary["signal_quality"]["ic"],
-            # 风控状态
             nav=risk_status["current_nav"],
             daily_pnl=risk_status["daily_pnl"],
-            # Week 1.5 特有指标
-            maker_fill_rate_high=fill_rate_stats["high"]["window_fill_rate"],
-            maker_fill_rate_medium=fill_rate_stats["medium"]["window_fill_rate"],
-            maker_healthy=high_healthy and medium_healthy,
-            execution_stats={
-                "total_signals": executor_stats["total_signals"],
-                "maker_executions": executor_stats["maker_executions"],
-                "ioc_executions": executor_stats["ioc_executions"],
-                "fallback_executions": executor_stats["fallback_executions"],
-                "maker_fill_rate": f"{executor_stats['maker_fill_rate']:.1f}%",
-                "ioc_fill_rate": f"{executor_stats['ioc_fill_rate']:.1f}%",
-                "skip_rate": f"{executor_stats['skip_rate']:.1f}%",
-            },
         )
 
 
@@ -477,11 +340,7 @@ async def main() -> None:
     setup_logging()
 
     logger = structlog.get_logger(__name__)
-    logger.info(
-        "hyperliquid_hybrid_trading_system_starting",
-        version="week1.5",
-        strategy="maker_taker_hybrid",
-    )
+    logger.info("hyperliquid_ioc_trading_system_starting")
 
     # 创建引擎
     engine = TradingEngine(config)
