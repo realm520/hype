@@ -79,3 +79,6 @@ Thumbs.db
 # 测试生成的报告（JSON 格式）
 docs/*_report_*.json
 docs/data_quality_report_*.json
+
+# Serena MCP
+.serena/
