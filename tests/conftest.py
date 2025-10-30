@@ -244,22 +244,86 @@ def test_config():
     )
 
 
+# ==================== 环境变量设置 ====================
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_env(monkeypatch_session):
+    """自动设置测试环境变量（整个测试会话生效）"""
+    import os
+
+    # 设置测试用的钱包配置（避免使用真实凭证）
+    os.environ.setdefault("HYPERLIQUID_WALLET_ADDRESS", "0x" + "0" * 40)
+    os.environ.setdefault("HYPERLIQUID_PRIVATE_KEY", "0x" + "1" * 64)
+
+    # 降低日志级别，减少测试输出噪音
+    os.environ.setdefault("LOG_LEVEL", "WARNING")
+    os.environ.setdefault("ENABLE_AUDIT_LOG", "false")
+
+    # 测试模式标识
+    os.environ.setdefault("TESTING", "true")
+
+    yield
+
+
+@pytest.fixture(scope="session")
+def monkeypatch_session():
+    """Session 级别的 monkeypatch（用于环境变量设置）"""
+    from _pytest.monkeypatch import MonkeyPatch
+
+    m = MonkeyPatch()
+    yield m
+    m.undo()
+
+
 # ==================== Mock 对象 Fixtures ====================
 
 
 @pytest.fixture
-def mock_api_client(mocker):
-    """Mock Hyperliquid API 客户端"""
-    mock = mocker.MagicMock()
-    mock.place_order.return_value = {
-        "status": "success",
-        "order_id": "mock_order_001",
-    }
-    mock.cancel_order.return_value = {"status": "success"}
-    mock.get_order_status.return_value = {
+def mock_api_client():
+    """
+    Mock Hyperliquid API 客户端（异步方法版本）
+
+    注意：不再接受 mocker 参数，直接使用 unittest.mock
+    这样可以避免与 Hyperliquid SDK 初始化的冲突
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock = MagicMock(spec=["place_order", "cancel_order", "get_order_status", "get_account_state", "wallet_address"])
+
+    # 正确配置异步方法（返回 AsyncMock）
+    mock.place_order = AsyncMock(return_value={
+        "status": "ok",
+        "response": {
+            "type": "order",
+            "data": {
+                "statuses": [{
+                    "resting": {
+                        "oid": "mock_order_001"
+                    }
+                }]
+            }
+        }
+    })
+
+    mock.cancel_order = AsyncMock(return_value={
+        "status": "ok",
+        "response": {"type": "cancel", "data": {"statuses": ["success"]}}
+    })
+
+    mock.get_order_status = AsyncMock(return_value={
         "status": "filled",
         "filled_size": "1.0",
-    }
+    })
+
+    mock.get_account_state = AsyncMock(return_value={
+        "marginSummary": {"accountValue": "100000.0"},
+        "assetPositions": []
+    })
+
+    # 模拟钱包地址
+    mock.wallet_address = "0x" + "0" * 40
+
     return mock
 
 

@@ -8,7 +8,6 @@
 5. 自动取消
 """
 
-import asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,7 +17,6 @@ from src.core.types import (
     ConfidenceLevel,
     Level,
     MarketData,
-    Order,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -394,7 +392,7 @@ class TestEdgeCases:
             "filled_size": "0.05",
         }
 
-        result = await executor.execute(signal, market_data, size=custom_size)
+        await executor.execute(signal, market_data, size=custom_size)
 
         # 验证使用自定义大小
         call_kwargs = mock_api_client.place_order.call_args.kwargs
