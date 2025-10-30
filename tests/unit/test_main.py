@@ -54,12 +54,14 @@ class TestHealthCheckAndRiskControl:
             }
         )
 
-        # Mock 风控管理器
-        trading_engine.risk_manager.get_statistics = MagicMock(
+        # Mock 风控管理器（使用正确的属性名 hard_limits）
+        trading_engine.hard_limits.get_status = MagicMock(
             return_value={
-                "total_pnl": 100.0,
+                "is_breached": False,
+                "breach_reason": None,
+                "current_nav": 100000.0,
+                "daily_pnl": 100.0,
                 "max_drawdown": 0.02,
-                "daily_drawdown": 0.01,
             }
         )
 
@@ -89,12 +91,14 @@ class TestHealthCheckAndRiskControl:
     async def test_health_check_detects_risk_control_breach(self, trading_engine):
         """验证风控指标异常触发告警"""
 
-        # Mock 风控管理器返回异常高的回撤
-        trading_engine.risk_manager.get_statistics = MagicMock(
+        # Mock 风控管理器返回异常状态（使用正确的属性名 hard_limits）
+        trading_engine.hard_limits.get_status = MagicMock(
             return_value={
-                "total_pnl": -500.0,
-                "max_drawdown": 0.08,  # 8% 回撤（超过 5% 阈值）
-                "daily_drawdown": 0.06,  # 6% 日回撤
+                "is_breached": True,
+                "breach_reason": "daily_drawdown_exceeded",
+                "current_nav": 99500.0,
+                "daily_pnl": -500.0,
+                "max_drawdown": 0.08,
             }
         )
 
@@ -121,8 +125,8 @@ class TestHealthCheckAndRiskControl:
         except asyncio.CancelledError:
             pass
 
-        # 验证：应该检查风控统计
-        assert trading_engine.risk_manager.get_statistics.called
+        # 验证：应该检查风控状态
+        assert trading_engine.hard_limits.get_status.called
 
     @pytest.mark.asyncio
     async def test_health_check_handles_exception(self, trading_engine):
@@ -156,9 +160,9 @@ class TestEngineLifecycle:
     async def test_start_initializes_data_feed(self, trading_engine):
         """验证 start() 初始化数据流"""
 
-        # Mock 数据流
+        # Mock 数据流（使用正确的属性名 data_manager）
         with patch.object(
-            trading_engine.data_feed, "start", new_callable=AsyncMock
+            trading_engine.data_manager, "start", new_callable=AsyncMock
         ) as mock_start:
             await trading_engine.start()
 
@@ -169,31 +173,31 @@ class TestEngineLifecycle:
     async def test_stop_closes_data_feed(self, trading_engine):
         """验证 stop() 关闭数据流"""
 
-        # 先启动引擎
-        with patch.object(trading_engine.data_feed, "start", new_callable=AsyncMock):
+        # 先启动引擎（使用正确的属性名 data_manager）
+        with patch.object(trading_engine.data_manager, "start", new_callable=AsyncMock):
             await trading_engine.start()
 
         # Mock 数据流关闭
         with patch.object(
-            trading_engine.data_feed, "close", new_callable=AsyncMock
-        ) as mock_close:
+            trading_engine.data_manager, "stop", new_callable=AsyncMock
+        ) as mock_stop:
             await trading_engine.stop()
 
             # 验证数据流已关闭
-            mock_close.assert_called_once()
+            mock_stop.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_stop_sets_running_flag_to_false(self, trading_engine):
         """验证 stop() 设置运行标志为 False"""
 
-        # 先启动
-        with patch.object(trading_engine.data_feed, "start", new_callable=AsyncMock):
+        # 先启动（使用正确的属性名 data_manager）
+        with patch.object(trading_engine.data_manager, "start", new_callable=AsyncMock):
             await trading_engine.start()
 
         assert trading_engine._running is True
 
         # 停止
-        with patch.object(trading_engine.data_feed, "close", new_callable=AsyncMock):
+        with patch.object(trading_engine.data_manager, "stop", new_callable=AsyncMock):
             await trading_engine.stop()
 
         assert trading_engine._running is False
@@ -218,9 +222,9 @@ class TestEngineLifecycle:
         # Mock 订单管理器
         trading_engine.order_manager.get_pending_orders = MagicMock(return_value=[order])
 
-        # 启动并停止
-        with patch.object(trading_engine.data_feed, "start", new_callable=AsyncMock):
-            with patch.object(trading_engine.data_feed, "close", new_callable=AsyncMock):
+        # 启动并停止（使用正确的属性名 data_manager）
+        with patch.object(trading_engine.data_manager, "start", new_callable=AsyncMock):
+            with patch.object(trading_engine.data_manager, "stop", new_callable=AsyncMock):
                 await trading_engine.start()
                 await trading_engine.stop()
 
@@ -362,9 +366,9 @@ class TestExceptionHandling:
     async def test_engine_handles_data_feed_exception(self, trading_engine):
         """验证数据流异常处理"""
 
-        # Mock 数据流启动抛出异常
+        # Mock 数据流启动抛出异常（使用正确的属性名 data_manager）
         with patch.object(
-            trading_engine.data_feed, "start", new_callable=AsyncMock, side_effect=Exception("Data feed error")
+            trading_engine.data_manager, "start", new_callable=AsyncMock, side_effect=Exception("Data feed error")
         ):
             # 尝试启动（应该抛出异常或优雅处理）
             with pytest.raises((Exception, RuntimeError)):

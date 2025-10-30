@@ -26,13 +26,12 @@ class TestTradingEngineInit:
         with patch("src.main.HyperliquidAPIClient", return_value=mock_api_client):
             engine = TradingEngine(test_config)
 
-            # 验证：所有核心组件已初始化
-            assert engine.data_feed is not None
-            assert engine.market_data_manager is not None
+            # 验证：所有核心组件已初始化（使用正确的属性名）
+            assert engine.data_manager is not None  # 使用 data_manager 而非 data_feed
             assert engine.signal_aggregator is not None
             assert engine.api_client is not None
             assert engine.executor is not None
-            assert engine.order_manager is not None
+            # 移除不存在的 order_manager 属性检查（Week 1.5 使用混合执行器）
             assert engine.hard_limits is not None
             assert engine.position_manager is not None
             assert engine.pnl_attribution is not None
@@ -48,8 +47,8 @@ class TestEngineStartStop:
         with patch("src.main.HyperliquidAPIClient", return_value=mock_api_client):
             engine = TradingEngine(test_config)
 
-            # Mock 数据流启动
-            with patch.object(engine.data_feed, "start", new_callable=AsyncMock):
+            # Mock 数据流启动（使用正确的属性名 data_manager）
+            with patch.object(engine.data_manager, "start", new_callable=AsyncMock):
                 await engine.start()
 
                 # 验证：运行标志已设置
@@ -61,12 +60,12 @@ class TestEngineStartStop:
         with patch("src.main.HyperliquidAPIClient", return_value=mock_api_client):
             engine = TradingEngine(test_config)
 
-            # 先启动
-            with patch.object(engine.data_feed, "start", new_callable=AsyncMock):
+            # 先启动（使用正确的属性名 data_manager）
+            with patch.object(engine.data_manager, "start", new_callable=AsyncMock):
                 await engine.start()
 
             # 停止
-            with patch.object(engine.data_feed, "close", new_callable=AsyncMock):
+            with patch.object(engine.data_manager, "stop", new_callable=AsyncMock):
                 await engine.stop()
 
                 # 验证：运行标志已清除
@@ -78,15 +77,15 @@ class TestEngineStartStop:
         with patch("src.main.HyperliquidAPIClient", return_value=mock_api_client):
             engine = TradingEngine(test_config)
 
-            # 先启动
-            with patch.object(engine.data_feed, "start", new_callable=AsyncMock):
+            # 先启动（使用正确的属性名 data_manager）
+            with patch.object(engine.data_manager, "start", new_callable=AsyncMock):
                 await engine.start()
 
             # Mock 数据流关闭
             with patch.object(
-                engine.data_feed, "close", new_callable=AsyncMock
-            ) as mock_close:
+                engine.data_manager, "stop", new_callable=AsyncMock
+            ) as mock_stop:
                 await engine.stop()
 
                 # 验证：数据流已关闭
-                mock_close.assert_called_once()
+                mock_stop.assert_called_once()

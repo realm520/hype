@@ -3,46 +3,14 @@
 跟踪和管理所有交易对的持仓状态。
 """
 
-from dataclasses import dataclass
+import time
 from decimal import Decimal
 
 import structlog
 
-from src.core.types import Order, OrderSide, OrderStatus
+from src.core.types import Order, OrderSide, OrderStatus, Position
 
 logger = structlog.get_logger()
-
-
-@dataclass
-class Position:
-    """持仓信息"""
-
-    symbol: str
-    size: Decimal  # 持仓数量（正数多头，负数空头）
-    entry_price: Decimal  # 平均开仓价
-    current_price: Decimal  # 当前价格
-    unrealized_pnl: Decimal  # 未实现盈亏
-    realized_pnl: Decimal  # 已实现盈亏
-
-    @property
-    def position_value_usd(self) -> Decimal:
-        """持仓价值（USD）"""
-        return abs(self.size) * self.current_price
-
-    @property
-    def is_long(self) -> bool:
-        """是否多头"""
-        return self.size > 0
-
-    @property
-    def is_short(self) -> bool:
-        """是否空头"""
-        return self.size < 0
-
-    @property
-    def is_flat(self) -> bool:
-        """是否平仓"""
-        return self.size == 0
 
 
 class PositionManager:
@@ -87,6 +55,8 @@ class PositionManager:
                 current_price=actual_price,
                 unrealized_pnl=Decimal("0"),
                 realized_pnl=Decimal("0"),
+                open_timestamp=None,  # Week 2: 初始状态无开仓时间
+                side=None,  # Week 2: 初始状态无方向
             )
 
         position = self._positions[order.symbol]
@@ -123,19 +93,28 @@ class PositionManager:
             # 完全平仓
             position.size = Decimal("0")
             position.entry_price = Decimal("0")
+            # Week 2: 清空生命周期字段
+            position.open_timestamp = None
+            position.side = None
         elif (old_size > 0 and new_size > 0 and trade_size > 0) or (old_size < 0 and new_size < 0 and trade_size < 0):
             # 加仓（同方向交易）
             total_cost = abs(old_size) * position.entry_price + abs(trade_size) * actual_price
             position.entry_price = total_cost / abs(new_size)
             position.size = new_size
+            # Week 2: 保持开仓时间和方向不变（加仓不更新）
         elif (old_size > 0 and new_size > 0) or (old_size < 0 and new_size < 0):
             # 部分平仓（保持 entry_price 不变）
             position.size = new_size
             # entry_price 保持不变
+            # Week 2: 保持开仓时间和方向不变
         else:
-            # 反向开仓
+            # 反向开仓（从空仓或反向开仓）
             position.size = new_size
             position.entry_price = actual_price
+            # Week 2: 记录新开仓的时间和方向
+            if old_size == 0:
+                position.open_timestamp = int(time.time() * 1000)  # 毫秒时间戳
+                position.side = order.side  # BUY 或 SELL
 
         position.current_price = actual_price
 
@@ -253,6 +232,45 @@ class PositionManager:
             "total_unrealized_pnl": float(self.get_total_unrealized_pnl()),
             "total_realized_pnl": float(self.get_total_realized_pnl()),
         }
+
+    def get_position_age_seconds(self, symbol: str) -> float | None:
+        """
+        获取持仓存活时间（秒）
+
+        Week 2 新增：用于超时平仓检测
+
+        Args:
+            symbol: 交易对
+
+        Returns:
+            float | None: 持仓存活时间（秒），未找到或未开仓返回 None
+        """
+        position = self.get_position(symbol)
+        if not position or position.open_timestamp is None:
+            return None
+
+        current_time_ms = int(time.time() * 1000)
+        age_ms = current_time_ms - position.open_timestamp
+        return age_ms / 1000.0  # 转换为秒
+
+    def is_position_stale(self, symbol: str, max_age_seconds: float) -> bool:
+        """
+        检查持仓是否过期（超过最大存活时间）
+
+        Week 2 新增：用于超时平仓触发器
+
+        Args:
+            symbol: 交易对
+            max_age_seconds: 最大存活时间（秒）
+
+        Returns:
+            bool: True 表示持仓过期，False 表示未过期或不存在
+        """
+        age = self.get_position_age_seconds(symbol)
+        if age is None:
+            return False  # 未开仓或不存在，不算过期
+
+        return age > max_age_seconds
 
     def __repr__(self) -> str:
         return (

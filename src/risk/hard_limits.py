@@ -85,7 +85,7 @@ class HardLimits:
         self,
         order: Order,
         current_price: Decimal,
-        current_position_size_usd: Decimal = Decimal("0"),
+        current_position_size: Decimal = Decimal("0"),  # 修改：币本位数量
         market_data: MarketData | None = None,
     ) -> tuple[bool, str | None]:
         """
@@ -94,7 +94,7 @@ class HardLimits:
         Args:
             order: 待检查订单
             current_price: 当前价格
-            current_position_size_usd: 当前持仓（USD）
+            current_position_size: 当前持仓数量（币本位，带符号）
             market_data: 市场数据（可选，用于动态滑点估算）
 
         Returns:
@@ -119,7 +119,7 @@ class HardLimits:
 
         # 3. 检查最大持仓
         position_check = self._check_position_size(
-            order, current_price, current_position_size_usd
+            order, current_price, current_position_size
         )
         if not position_check[0]:
             return position_check
@@ -241,7 +241,7 @@ class HardLimits:
         self,
         order: Order,
         current_price: Decimal,
-        current_position_size_usd: Decimal,
+        current_position_size: Decimal,  # 修改：现在是持仓数量（币本位），不是价值
     ) -> tuple[bool, str | None]:
         """
         检查最大持仓限制
@@ -249,23 +249,37 @@ class HardLimits:
         Args:
             order: 订单
             current_price: 当前价格
-            current_position_size_usd: 当前持仓（USD）
+            current_position_size: 当前持仓数量（币本位，带符号：正数多头，负数空头）
 
         Returns:
             tuple[bool, Optional[str]]: (是否允许, 拒绝原因)
         """
-        # 计算订单后持仓
-        order_value = order.size * current_price
-
+        # 计算订单后持仓数量
         if order.side == OrderSide.BUY:
-            new_position_size = current_position_size_usd + order_value
+            new_position_size = current_position_size + order.size
         else:
-            new_position_size = current_position_size_usd - order_value
+            new_position_size = current_position_size - order.size
 
-        # 检查绝对值
-        if abs(new_position_size) > self.max_position_size_usd:
+        # 计算新持仓价值（USD）
+        new_position_value_usd = abs(new_position_size) * current_price
+        
+        # DEBUG: 添加调试日志
+        logger.debug(
+            "position_check_calculation",
+            symbol=order.symbol,
+            current_position_size=float(current_position_size),
+            order_size=float(order.size),
+            order_side=order.side.name,
+            new_position_size=float(new_position_size),
+            current_price=float(current_price),
+            new_position_value_usd=float(new_position_value_usd),
+            max_limit=float(self.max_position_size_usd),
+        )
+
+        # 检查持仓价值限制
+        if new_position_value_usd > self.max_position_size_usd:
             reason = (
-                f"Position size limit exceeded: new_position={float(new_position_size):.2f} "
+                f"Position size limit exceeded: new_position={float(new_position_value_usd):.2f} "
                 f"> max_position={float(self.max_position_size_usd):.2f}"
             )
             logger.warning("position_size_limit_breach", reason=reason)

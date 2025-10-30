@@ -13,19 +13,22 @@ import structlog
 from src.analytics.maker_fill_rate_monitor import MakerFillRateMonitor
 from src.analytics.metrics import MetricsCollector
 from src.analytics.pnl_attribution import PnLAttribution
-from src.core.config import Config, load_config
+from src.core.config import Config, load_config, load_yaml_config
 from src.core.data_feed import MarketDataManager
 from src.core.logging import setup_logging
 from src.core.types import OrderSide
 from src.execution.hybrid_executor import HybridExecutor
 from src.execution.ioc_executor import IOCExecutor
+from src.execution.position_closer import PositionCloser
 from src.execution.shallow_maker_executor import ShallowMakerExecutor
 from src.execution.signal_classifier import SignalClassifier
+from src.execution.signal_deduplicator import SignalDeduplicator
 from src.execution.slippage_estimator import SlippageEstimator
 from src.hyperliquid.api_client import HyperliquidAPIClient
 from src.hyperliquid.websocket_client import HyperliquidWebSocket
 from src.risk.hard_limits import HardLimits
 from src.risk.position_manager import PositionManager
+from src.risk.tp_sl_manager import TPSLManager
 from src.signals.aggregator import create_aggregator_from_config
 
 logger = structlog.get_logger()
@@ -50,14 +53,16 @@ class TradingEngine:
         10. 健康检查
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, dry_run: bool = False):
         """
         初始化交易引擎
 
         Args:
             config: 配置对象
+            dry_run: 是否启用 Paper Trading 模拟模式
         """
         self.config = config
+        self.dry_run = dry_run
         self.symbols = config.hyperliquid.symbols
         self._running = False
         self._health_check_interval = 60  # 健康检查间隔（秒）
@@ -106,16 +111,17 @@ class TradingEngine:
         self.api_client = HyperliquidAPIClient(
             wallet_address=config.hyperliquid.wallet_address,
             private_key=config.hyperliquid.private_key,
+            dry_run=dry_run,  # Paper Trading 模式下启用模拟
         )
 
         # IOC 执行器（用于回退）
         self.ioc_executor = IOCExecutor(self.api_client)
 
         # 浅被动 Maker 执行器
-        # 注意：ExecutionConfig 不包含 default_size，使用固定值 0.01
+        # 注意：ExecutionConfig 不包含 default_size，使用固定值 0.001（小资金测试）
         self.shallow_maker = ShallowMakerExecutor(
             api_client=self.api_client,
-            default_size=Decimal("0.01"),  # Week 1.5 默认订单尺寸
+            default_size=Decimal("0.001"),  # 小资金测试订单尺寸
             timeout_high=5.0,  # HIGH 置信度超时 5 秒
             timeout_medium=3.0,  # MEDIUM 置信度超时 3 秒
             tick_offset=Decimal("0.1"),  # BTC/ETH 标准 tick
@@ -156,17 +162,39 @@ class TradingEngine:
             critical_threshold=0.60,  # 严重告警阈值 60%
         )
 
-        logger.info(
-            "trading_engine_initialized",
-            signal_classifier_thresholds={
-                "theta_1": config.signals.thresholds.theta_1,
-                "theta_2": config.signals.thresholds.theta_2,
-            },
-            maker_timeouts={"high": 5.0, "medium": 3.0},
-            fallback_config={
-                "enable_fallback": True,
-                "fallback_on_medium": False,
-            },
+        # Week 2 Phase 2: TP/SL + 平仓协调器
+        self.tp_sl_manager = TPSLManager(
+            take_profit_pct=getattr(
+                config.risk, "tp_sl", {}
+            ).get("take_profit_pct", 0.02),
+            stop_loss_pct=getattr(
+                config.risk, "tp_sl", {}
+            ).get("stop_loss_pct", 0.01),
+        )
+
+        self.position_closer = PositionCloser(
+            tp_sl_manager=self.tp_sl_manager,
+            position_manager=self.position_manager,
+            ioc_executor=self.ioc_executor,
+            max_position_age_seconds=getattr(
+                config.risk, "tp_sl", {}
+            ).get("max_position_age_seconds", 1800.0),
+        )
+
+        # Week 2 Phase 1: 信号去重器
+        self.signal_deduplicator = SignalDeduplicator(
+            cooldown_seconds=getattr(
+                config.signals, "dedup", {}
+            ).get("cooldown_seconds", 5.0),
+            change_threshold=getattr(
+                config.signals, "dedup", {}
+            ).get("change_threshold", 0.15),
+            decay_factor=getattr(
+                config.signals, "dedup", {}
+            ).get("decay_factor", 0.85),
+            max_same_direction=getattr(
+                config.signals, "dedup", {}
+            ).get("max_same_direction", 3),
         )
 
     async def start(self) -> None:
@@ -208,7 +236,26 @@ class TradingEngine:
 
         while self._running:
             try:
-                # 遍历所有交易对
+                # Week 2 Phase 2: 先检查所有持仓，执行平仓
+                market_data_dict = {
+                    symbol: md
+                    for symbol in self.symbols
+                    if (md := self.data_manager.get_market_data(symbol)) is not None
+                }
+                closed_orders = await self.position_closer.check_and_close_positions(
+                    market_data_dict
+                )
+
+                # 记录平仓订单
+                for order in closed_orders:
+                    logger.info(
+                        "position_closed",
+                        symbol=order.symbol,
+                        order_id=order.id,
+                        reason="tp_sl_or_timeout",
+                    )
+
+                # 遍历所有交易对（开仓逻辑）
                 for symbol in self.symbols:
                     await self._process_symbol(symbol)
 
@@ -239,6 +286,17 @@ class TradingEngine:
             # 2. 计算聚合信号
             signal_score = self.signal_aggregator.calculate(market_data)
 
+            # Week 2 Phase 1: 信号去重
+            current_position = self.position_manager.get_position(symbol)
+            filtered_signal = self.signal_deduplicator.filter(
+                signal_score, market_data, current_position
+            )
+
+            if filtered_signal is None:
+                return  # 信号被去重器拒绝
+
+            signal_score = filtered_signal  # 使用去重后的信号
+
             # 3. 信号强度分级（Week 1.5 新增）
             confidence_level = self.signal_classifier.classify(signal_score.value)
             # 更新 signal_score 的置信度
@@ -255,8 +313,9 @@ class TradingEngine:
 
             # 5. 风控预检查
             current_position = self.position_manager.get_position(symbol)
-            current_position_value = (
-                current_position.position_value_usd if current_position else Decimal("0")
+            # 修改：传入持仓数量（币本位），而非持仓价值
+            current_position_size = (
+                current_position.size if current_position else Decimal("0")
             )
 
             # 创建模拟订单进行风控检查
@@ -282,7 +341,7 @@ class TradingEngine:
             )
 
             is_allowed, reject_reason = self.hard_limits.check_order(
-                test_order, market_data.mid_price, current_position_value
+                test_order, market_data.mid_price, current_position_size  # 修改：传入币数量
             )
 
             if not is_allowed:
@@ -463,7 +522,8 @@ class TradingEngine:
                 "fallback_executions": executor_stats["fallback_executions"],
                 "maker_fill_rate": f"{executor_stats['maker_fill_rate']:.1f}%",
                 "ioc_fill_rate": f"{executor_stats['ioc_fill_rate']:.1f}%",
-                "skip_rate": f"{executor_stats['skip_rate']:.1f}%",
+                # skip_rate 不在 executor_stats 中，使用 skipped_signals 计算
+                "skip_rate": f"{(executor_stats['skipped_signals'] / max(executor_stats['total_signals'], 1) * 100):.1f}%",
             },
         )
 
@@ -471,7 +531,12 @@ class TradingEngine:
 async def main() -> None:
     """主函数"""
     # 加载配置
-    config = load_config("config/week1_ioc.yaml")
+    config_path = "config/paper_trading.yaml"
+    config = load_config(config_path)
+
+    # 检测 Paper Trading 模式
+    yaml_config = load_yaml_config(config_path)
+    is_paper_trading = yaml_config.get("paper_trading", {}).get("enabled", False)
 
     # 配置日志系统
     setup_logging()
@@ -481,10 +546,11 @@ async def main() -> None:
         "hyperliquid_hybrid_trading_system_starting",
         version="week1.5",
         strategy="maker_taker_hybrid",
+        paper_trading=is_paper_trading,
     )
 
     # 创建引擎
-    engine = TradingEngine(config)
+    engine = TradingEngine(config, dry_run=is_paper_trading)
 
     # 设置信号处理
     def shutdown_handler(signum: int, frame: Any) -> None:

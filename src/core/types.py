@@ -134,13 +134,44 @@ class SignalScore:
 
 @dataclass
 class Position:
-    """持仓信息"""
+    """持仓信息
+
+    Week 2 扩展：
+        - open_timestamp: 开仓时间戳（用于超时平仓检测）
+        - side: 持仓方向（用于平仓逻辑和审计日志）
+        - current_price: 当前价格（用于 PnL 计算和 TP/SL 检测）
+    """
 
     symbol: str
     size: Decimal  # 正数=多头，负数=空头
     entry_price: Decimal | None = None
     unrealized_pnl: Decimal = Decimal("0")
     realized_pnl: Decimal = Decimal("0")
+
+    # Week 2 Phase 2 新增字段
+    open_timestamp: int | None = None  # 开仓时间戳（毫秒）
+    side: "OrderSide | None" = None  # 持仓方向（BUY/SELL）
+    current_price: Decimal = Decimal("0")  # 当前价格
+
+    @property
+    def position_value_usd(self) -> Decimal:
+        """持仓价值（USD）"""
+        return abs(self.size) * self.current_price
+
+    @property
+    def is_long(self) -> bool:
+        """是否多头"""
+        return self.size > 0
+
+    @property
+    def is_short(self) -> bool:
+        """是否空头"""
+        return self.size < 0
+
+    @property
+    def is_flat(self) -> bool:
+        """是否平仓"""
+        return self.size == 0
 
 
 @dataclass
