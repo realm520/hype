@@ -373,7 +373,7 @@ class ShallowMakerExecutor:
         status = result.get("status", "unknown")
 
         # 映射状态
-        if status == "success":
+        if status == "success" or status == "ok":
             order_status = OrderStatus.PENDING  # 限价单初始状态为 PENDING
         elif status == "error":
             order_status = OrderStatus.REJECTED
@@ -385,8 +385,19 @@ class ShallowMakerExecutor:
         statuses = order_data.get("statuses", [{}])
         first_status = statuses[0] if statuses else {}
 
+        # 提取 order_id（支持 Paper Trading 模拟响应）
+        # 模拟响应格式：{"filled": {"oid": 1001}} 或 {"resting": {"oid": 1001}}
+        # 真实响应格式：{"resting": {"oid": 123456}}
+        order_id = "unknown"
+        if "filled" in first_status and "oid" in first_status["filled"]:
+            order_id = str(first_status["filled"]["oid"])
+        elif "resting" in first_status and "oid" in first_status["resting"]:
+            order_id = str(first_status["resting"]["oid"])
+        elif "id" in result:
+            order_id = str(result["id"])
+
         return Order(
-            id=str(result.get("id", "unknown")),
+            id=order_id,
             symbol=symbol,
             side=side,
             order_type=OrderType.LIMIT,

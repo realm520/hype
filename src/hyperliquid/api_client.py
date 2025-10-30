@@ -5,6 +5,7 @@
 """
 
 import os
+import random
 from decimal import Decimal
 from typing import Any, cast
 
@@ -24,6 +25,7 @@ class HyperliquidAPIClient:
         self,
         wallet_address: str,
         private_key: str,
+        dry_run: bool = False,
     ):
         """
         初始化 API 客户端
@@ -31,24 +33,36 @@ class HyperliquidAPIClient:
         Args:
             wallet_address: 钱包地址
             private_key: 私钥
+            dry_run: 是否启用 dry-run 模式（Paper Trading 模拟模式）
         """
         self.wallet_address = wallet_address
+        self.dry_run = dry_run
 
-        # 固定使用 mainnet
-        base_url = constants.MAINNET_API_URL
-        logger.info("initialized_hyperliquid_client", network="mainnet")
+        if dry_run:
+            # Paper Trading 模式：不初始化真实 SDK
+            logger.info(
+                "initialized_hyperliquid_client_dryrun",
+                network="mainnet",
+                mode="paper_trading",
+            )
+            self.exchange = None  # type: ignore
+        else:
+            # 固定使用 mainnet
+            base_url = constants.MAINNET_API_URL
+            logger.info("initialized_hyperliquid_client", network="mainnet")
 
-        # 初始化 SDK Exchange 对象
-        # 需要从私钥创建 LocalAccount 对象
-        from eth_account import Account
+            # 初始化 SDK Exchange 对象
+            # 需要从私钥创建 LocalAccount 对象
+            from eth_account import Account
 
-        wallet = Account.from_key(private_key)
-        self.exchange = HyperliquidExchange(
-            wallet=wallet,
-            base_url=base_url,
-        )
+            wallet = Account.from_key(private_key)
+            self.exchange = HyperliquidExchange(
+                wallet=wallet,
+                base_url=base_url,
+            )
 
         self._order_count = 0
+        self._simulated_order_id = 1000  # 模拟订单 ID 起始值
 
     async def place_order(
         self,
@@ -92,12 +106,55 @@ class HyperliquidAPIClient:
             size=float(size),
             price=float(price) if price else None,
             order_type=order_type.value,
+            dry_run=self.dry_run,
         )
 
+        # Paper Trading 模式：模拟订单提交
+        if self.dry_run:
+            order_id = self._simulated_order_id
+            self._simulated_order_id += 1
+            self._order_count += 1
+
+            # 模拟成交概率（根据订单类型）
+            if order_type == OrderType.IOC:
+                # IOC 高成交率 95%
+                filled = random.random() < 0.95
+                fill_status = "filled" if filled else "cancelled"
+            else:
+                # Limit 订单 80% 成交率
+                filled = random.random() < 0.80
+                fill_status = "filled" if filled else "resting"
+
+            result = {
+                "status": "ok",
+                "response": {
+                    "type": "order",
+                    "data": {
+                        "statuses": [
+                            {
+                                "resting" if fill_status == "resting" else "filled": {
+                                    "oid": order_id
+                                }
+                            }
+                        ],
+                    },
+                },
+            }
+
+            logger.info(
+                "paper_trading_order_simulated",
+                order_id=order_id,
+                fill_status=fill_status,
+                filled=filled,
+            )
+
+            return result
+
+        # 真实模式：调用 SDK 提交订单
         try:
-            # 调用 SDK 提交订单
+            # 调用 SDK 提交订单（注意：参数名是 name 而非 coin）
             result = self.exchange.order(
-                coin=symbol,
+                name=symbol,
                 is_buy=is_buy,
                 sz=float(size),
                 limit_px=float(price) if price else None,
@@ -138,10 +195,18 @@ class HyperliquidAPIClient:
         Returns:
             dict: 取消响应
         """
-        logger.info("cancelling_order", symbol=symbol, order_id=order_id)
+        logger.info("cancelling_order", symbol=symbol, order_id=order_id, dry_run=self.dry_run)
 
+        # Paper Trading 模式：模拟取消
+        if self.dry_run:
+            result = {"status": "ok", "response": {"type": "cancel", "data": {"oid": order_id}}}
+            logger.info("paper_trading_order_cancelled", order_id=order_id)
+            return result
+
+        # 真实模式
         try:
-            result = self.exchange.cancel(coin=symbol, oid=order_id)
+            # 注意：参数名是 name 而非 coin
+            result = self.exchange.cancel(name=symbol, oid=order_id)
 
             logger.info("order_cancelled", order_id=order_id, result=result)
 
@@ -161,6 +226,11 @@ class HyperliquidAPIClient:
         Returns:
             dict: 订单状态，未找到返回 None
         """
+        # Paper Trading 模式：返回模拟状态
+        if self.dry_run:
+            return {"oid": order_id, "status": "filled", "simulated": True}
+
+        # 真实模式
         try:
             # SDK 通过 user_state 查询订单
             user_state = self.exchange.info.user_state(self.wallet_address)
@@ -186,6 +256,15 @@ class HyperliquidAPIClient:
         Returns:
             dict: 账户状态（余额、持仓等）
         """
+        # Paper Trading 模式：返回模拟账户状态
+        if self.dry_run:
+            return {
+                "marginSummary": {"accountValue": "1000.0"},
+                "assetPositions": [],
+                "simulated": True,
+            }
+
+        # 真实模式
         try:
             user_state = self.exchange.info.user_state(self.wallet_address)
             return cast(dict[str, Any], user_state)
@@ -201,6 +280,11 @@ class HyperliquidAPIClient:
         Returns:
             bool: API 是否健康
         """
+        # Paper Trading 模式：始终健康
+        if self.dry_run:
+            return True
+
+        # 真实模式
         try:
             # 尝试获取账户状态
             self.exchange.info.user_state(self.wallet_address)
@@ -216,13 +300,16 @@ class HyperliquidAPIClient:
 
 
 # 工厂函数
-def create_api_client_from_env() -> HyperliquidAPIClient:
+def create_api_client_from_env(dry_run: bool = False) -> HyperliquidAPIClient:
     """
     从环境变量创建 API 客户端（仅 mainnet）
 
     环境变量：
         HYPERLIQUID_WALLET_ADDRESS: 钱包地址
         HYPERLIQUID_PRIVATE_KEY: 私钥
+
+    Args:
+        dry_run: 是否启用 Paper Trading 模拟模式（默认 False）
 
     Returns:
         HyperliquidAPIClient: API 客户端实例
@@ -238,4 +325,5 @@ def create_api_client_from_env() -> HyperliquidAPIClient:
     return HyperliquidAPIClient(
         wallet_address=wallet_address,
         private_key=private_key,
+        dry_run=dry_run,
     )

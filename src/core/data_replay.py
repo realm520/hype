@@ -16,7 +16,7 @@ from typing import Any
 import polars as pl
 import structlog
 
-from src.core.types import Level, MarketData, Side, Trade
+from src.core.types import Level, MarketData, OrderSide, Trade
 
 logger = structlog.get_logger()
 
@@ -28,6 +28,7 @@ class DataReplayEngine:
         self,
         data_dir: str,
         replay_speed: float = 1.0,
+        load_trades: bool = True,
     ):
         """
         初始化回放引擎
@@ -35,9 +36,11 @@ class DataReplayEngine:
         Args:
             data_dir: 数据目录或文件前缀（不含 _l2/_trades 后缀）
             replay_speed: 回放速度倍数（1.0 = 实时，100.0 = 100倍加速）
+            load_trades: 是否加载 trades 数据（默认 True）
         """
         self.data_path = Path(data_dir)
         self.replay_speed = replay_speed
+        self.load_trades = load_trades
 
         # 加载数据
         self.l2_df: pl.DataFrame | None = None
@@ -90,11 +93,13 @@ class DataReplayEngine:
         self.l2_df = pl.read_parquet(l2_path)
 
         # 加载 Trades 数据
-        if trades_path and trades_path.exists():
+        if self.load_trades and trades_path and trades_path.exists():
             logger.info("loading_trades_data", file=str(trades_path))
             self.trades_df = pl.read_parquet(trades_path)
-        else:
+        elif self.load_trades:
             logger.warning("no_trades_data_found")
+        else:
+            logger.info("skipping_trades_data_load")
 
         # 加载元数据
         if metadata_path and metadata_path.exists():
@@ -231,8 +236,9 @@ class DataReplayEngine:
         for row in trades_filtered.iter_rows(named=True):
             trades.append(
                 Trade(
+                    symbol=symbol,
                     timestamp=row["timestamp"],
-                    side=Side[row["side"]],
+                    side=OrderSide[row["side"]],
                     price=Decimal(str(row["price"])),
                     size=Decimal(str(row["size"])),
                 )
@@ -242,7 +248,7 @@ class DataReplayEngine:
 
     def is_finished(self) -> bool:
         """检查回放是否结束"""
-        return self.current_index >= len(self.l2_df) if self.l2_df else True
+        return self.current_index >= len(self.l2_df) if self.l2_df is not None else True
 
     def get_progress(self) -> float:
         """获取回放进度（0.0 - 1.0）"""
