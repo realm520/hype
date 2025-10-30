@@ -1,0 +1,234 @@
+# Paper Trading 配置（Week 1.5 Maker/Taker 混合策略）
+# 用途：无风险验证交易系统，初始模拟资金 $1,000
+
+# 继承 Week 1.5 混合策略配置
+extends: "week1.5_hybrid.yaml"
+
+# Paper Trading 专用设置
+environment: "paper_trading"  # 标识为 Paper Trading 模式
+
+# 初始资金（模拟）
+# 注意：系统默认使用 base.yaml 的 initial_nav（100000），需要在 risk 部分覆盖
+# initial_nav: 1000.0  # Paper Trading 模式下的净值由 hard_limits 的 initial_nav 控制
+
+# 风控参数（根据小资金调整）
+risk:
+  # Week 2 Phase 2: TP/SL 管理
+  tp_sl:
+    enabled: true
+    take_profit_pct: 0.02  # 止盈 2%
+    stop_loss_pct: 0.01  # 止损 1%
+    max_position_age_seconds: 1800.0  # 持仓最大存活 30 分钟
+
+  # 硬熔断（根据 $1,000 资金调整）
+  hard_limits:
+    enabled: true
+    initial_nav: 1000.0  # ⚠️ Paper Trading 初始资金 $1,000
+    max_single_loss_pct: 0.008  # 单笔最大亏损 0.8% = $8
+    max_daily_drawdown_pct: 0.05  # 日最大回撤 5% = $50
+    max_position_size_usd: 500.0  # 单品种最大仓位 $500（小资金测试）
+    api_health_check_interval: 10.0  # API 健康检查间隔（秒）
+
+  # 动态风控（Week 1.5 暂未启用）
+  dynamic:
+    enabled: false
+
+# 执行配置（Week 1.5 混合执行）
+execution:
+  strategy: "hybrid_maker_taker"  # Maker/Taker 混合模式
+
+  # Maker 执行配置
+  maker:
+    enabled: true
+    tick_offset: 0.1  # BTC/ETH 标准 tick
+    use_post_only: true  # 确保成为 Maker
+    timeout_high: 5.0  # HIGH 置信度超时 5 秒
+    timeout_medium: 3.0  # MEDIUM 置信度超时 3 秒
+
+  # IOC 回退配置
+  ioc:
+    enabled: true
+    price_strategy: "aggressive_limit"  # 贴盘口限价
+    max_retries: 0  # 不重试（IOC 特性）
+
+  # 混合执行器配置
+  hybrid:
+    enable_fallback: true  # 启用 IOC 回退
+    fallback_on_medium: false  # MEDIUM 超时不回退
+
+  # 订单尺寸配置（根据小资金调整）
+  sizing:
+    method: "fixed"  # 使用固定尺寸（简化）
+    default_size: 0.001  # 固定 0.001 BTC/ETH（减小 10 倍）
+    max_size_usd: 50.0  # 单笔最大 $50
+
+# 信号配置（继承 Week 1.5）
+signals:
+  # Week 2 Phase 1: 去重配置
+  dedup:
+    enabled: true
+    cooldown_seconds: 5.0  # 冷却时间 5 秒
+    change_threshold: 0.15  # 变化阈值 15%
+    decay_factor: 0.85  # 衰减系数 0.85
+    max_same_direction: 3  # 最大连续同方向 3 次
+
+  enabled:
+    - obi
+    - microprice
+    - impact
+
+  # OBI 信号
+  obi:
+    levels: 5  # 档位数
+    weight: 0.35  # 权重
+
+  # Microprice 信号
+  microprice:
+    weight: 0.40
+
+  # Impact 信号
+  impact:
+    window_ms: 5000  # 5 秒窗口
+    weight: 0.25
+
+  # 置信度阈值（Week 1.5 混合策略）
+  thresholds:
+    theta_1: 0.5  # 高置信度：Maker 开仓 + IOC 平仓
+    theta_2: 0.2  # 中置信度：Maker 开仓（3s 超时）+ IOC 平仓
+
+# 监控配置（适用于 Paper Trading）
+monitoring:
+  # 延迟监控（Paper Trading 可能略高）
+  latency:
+    enabled: true
+    targets:
+      ws_processing: 10  # WebSocket 处理 < 10ms（放宽）
+      orderbook_update: 10  # 订单簿更新 < 10ms
+      signal_calculation: 20  # 信号计算 < 20ms
+      order_submission: 100  # 订单提交 < 100ms
+      end_to_end: 200  # 端到端 < 200ms（放宽）
+
+  # 告警（Paper Trading 降低敏感度）
+  alerts:
+    enabled: true
+    channels:
+      - "log"  # 仅日志告警
+
+    triggers:
+      - type: "hard_limit"
+        severity: "critical"
+      - type: "api_error"
+        severity: "high"
+      - type: "high_latency"
+        threshold_ms: 300  # 放宽到 300ms
+        severity: "medium"
+      - type: "low_fill_rate"
+        threshold: 0.75  # 放宽到 75%
+        severity: "medium"
+
+# 验证配置（Paper Trading 放宽标准）
+validation:
+  # 信号验证
+  signals:
+    min_ic: 0.02  # 放宽到 0.02（原 0.03）
+    min_spread_bps: 6  # 放宽到 6 bps（原 8 bps）
+
+  # Maker 成交率验证（Paper Trading 可能较低）
+  execution:
+    min_maker_fill_rate_high: 0.70  # HIGH 置信度目标 70%（原 80%）
+    min_maker_fill_rate_medium: 0.65  # MEDIUM 置信度目标 65%（原 75%）
+    max_slippage_deviation: 0.30  # 滑点偏差 30%（放宽）
+
+  # PnL 验证
+  pnl:
+    min_sharpe: 0.8  # 放宽到 0.8（原 1.0）
+    min_win_rate: 0.55  # 放宽到 55%（原 60%）
+    min_profit_factor: 1.3  # 放宽到 1.3（原 1.5）
+
+# PnL 归因配置
+analytics:
+  pnl_attribution:
+    enabled: true
+    components:
+      - alpha  # 方向性收益
+      - fee  # 手续费（Maker: 1.5 bps, Taker: 4.5 bps）
+      - slippage  # 滑点
+      - impact  # 冲击
+      - rebate  # 回扣（Paper Trading 可能为 0）
+
+    # 健康标准（Paper Trading 放宽）
+    health_check:
+      min_alpha_pct: 0.65  # Alpha 至少 65%（原 70%）
+      max_cost_pct: 0.30  # 成本最多 30%（原 25%）
+
+# Hyperliquid 配置（Paper Trading 使用测试环境）
+hyperliquid:
+  # 注意：Paper Trading 仍连接 mainnet，但仅模拟订单
+  # 实际不会提交真实订单到链上
+  network: "mainnet"
+  symbols:
+    # - "BTC"  # 暂时禁用 BTC（价格太高，0.001 BTC = $111，只能下 4 单）
+    - "ETH"  # 仅测试 ETH（0.001 ETH = $3，可下 150+ 单）
+
+  # API 配置（从环境变量读取）
+  wallet_address: "${HYPERLIQUID_WALLET_ADDRESS}"
+  private_key: "${HYPERLIQUID_PRIVATE_KEY}"  # Paper Trading 模式下不会实际签名
+
+  # WebSocket 配置
+  ws:
+    ping_interval: 30.0  # 心跳间隔（秒）
+    reconnect_delay: 5.0  # 重连延迟（秒）
+    max_reconnects: 10  # 最大重连次数
+
+# 日志配置（Paper Trading 增强日志）
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+  log_dir: "logs"
+  retention_days: 7  # Paper Trading 只保留 7 天日志
+  enable_audit_log: true  # 启用审计日志
+
+  # Paper Trading 特定日志
+  paper_trading:
+    log_simulated_orders: true  # 记录模拟订单
+    log_fill_simulation: true  # 记录成交模拟
+    log_pnl_updates: true  # 记录 PnL 更新
+
+# Paper Trading 特定配置
+paper_trading:
+  enabled: true  # 启用 Paper Trading 模式
+
+  # 成交模拟配置
+  fill_simulation:
+    method: "conservative"  # conservative | realistic | optimistic
+    maker_fill_rate_high: 0.80  # HIGH 置信度模拟成交率 80%
+    maker_fill_rate_medium: 0.75  # MEDIUM 置信度模拟成交率 75%
+    ioc_fill_rate: 0.95  # IOC 模拟成交率 95%
+    slippage_factor: 1.2  # 滑点系数（1.2x 实际预估）
+
+  # 延迟模拟（模拟真实网络延迟）
+  latency_simulation:
+    enabled: true
+    order_submission_ms: 50  # 订单提交延迟 50ms
+    fill_confirmation_ms: 30  # 成交确认延迟 30ms
+
+  # 报告配置
+  reporting:
+    enabled: true
+    frequency: "5min"  # 每 5 分钟生成报告
+    metrics:
+      - "pnl_summary"
+      - "signal_quality"
+      - "execution_stats"
+      - "maker_fill_rates"
+      - "cost_breakdown"
+
+# 健康检查配置
+health_check:
+  enabled: true
+  interval: 60  # 每 60 秒检查一次
+  checks:
+    - "alpha_health"  # Alpha 健康度
+    - "maker_fill_rate"  # Maker 成交率
+    - "risk_status"  # 风控状态
+    - "signal_quality"  # 信号质量
+    - "execution_quality"  # 执行质量
