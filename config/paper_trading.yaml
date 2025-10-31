@@ -161,6 +161,48 @@ analytics:
       min_alpha_pct: 0.65  # Alpha 至少 65%（原 70%）
       max_cost_pct: 0.30  # 成本最多 30%（原 25%）
 
+  # Week 2 Phase 3: Alpha 健康检查器配置
+  alpha_health:
+    enabled: true
+
+    # IC（信息系数）阈值
+    ic_thresholds:
+      healthy: 0.03  # IC ≥ 0.03 为健康
+      degrading: 0.01  # IC < 0.01 为衰退
+
+    # Alpha 占比阈值
+    alpha_pct_thresholds:
+      healthy: 70.0  # Alpha% ≥ 70% 为健康
+      degrading: 50.0  # Alpha% < 50% 为衰退
+
+    # 连续亏损阈值
+    consecutive_loss_thresholds:
+      degrading: 3  # 连续 3 次亏损 → DEGRADING
+      failed: 5  # 连续 5 次亏损 → FAILED
+
+    # IC 衰退检测（Paper Trading 禁用）
+    ic_decay_detection:
+      enabled: false  # Paper Trading 数据不足，禁用衰退检测
+      lookback_window: 100
+      min_samples: 50
+      decay_threshold: 0.3  # IC 下降 30% 视为衰退
+
+  # 市场状态检测器配置
+  market_state:
+    enabled: true
+
+    # 市场状态阈值
+    thresholds:
+      high_volatility: 0.02  # 波动率 > 2%
+      low_liquidity: 0.3  # 流动性得分 < 0.3
+      wide_spread: 15.0  # 点差 > 15 bps
+      high_reversals: 5  # 价格反转次数 > 5
+
+    # 流动性检测
+    liquidity:
+      min_depth: 10.0  # 最小流动性深度
+      depth_levels: 3  # 检测前 3 档
+
 # Hyperliquid 配置（Paper Trading 使用测试环境）
 hyperliquid:
   # 注意：Paper Trading 仍连接 mainnet，但仅模拟订单

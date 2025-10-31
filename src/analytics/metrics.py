@@ -304,6 +304,44 @@ class MetricsCollector:
 
         return summary
 
+    def get_ic_stats(self) -> dict:
+        """
+        获取 IC 统计信息（供 AlphaHealthChecker 使用）
+
+        计算信号值与实际收益的 Spearman 相关性。
+
+        Returns:
+            dict: IC 统计信息
+                - ic: float - 信息系数（Spearman 相关性）
+                - p_value: float - 显著性 p 值
+                - sample_size: int - 样本数量
+        """
+        # 筛选有效记录（有实际收益的记录）
+        valid_records = [
+            r
+            for r in list(self._signal_records)[-self.ic_window :]
+            if r.actual_return is not None
+        ]
+
+        # 样本数不足
+        if len(valid_records) < 10:
+            return {"ic": 0.0, "p_value": 1.0, "sample_size": len(valid_records)}
+
+        # 提取信号值和实际收益
+        signals = [r.signal_value for r in valid_records]
+        returns = [r.actual_return for r in valid_records]
+
+        # 计算 Spearman 相关性
+        try:
+            correlation, p_value = stats.spearmanr(signals, returns)
+            return {
+                "ic": float(correlation) if not np.isnan(correlation) else 0.0,
+                "p_value": float(p_value) if not np.isnan(p_value) else 1.0,
+                "sample_size": len(valid_records),
+            }
+        except Exception:
+            return {"ic": 0.0, "p_value": 1.0, "sample_size": len(valid_records)}
+
     def get_recent_signals(self, n: int = 10) -> list[SignalRecord]:
         """
         获取最近 N 个信号记录

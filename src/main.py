@@ -10,7 +10,9 @@ from typing import Any
 
 import structlog
 
+from src.analytics.alpha_health_checker import AlphaHealthChecker
 from src.analytics.maker_fill_rate_monitor import MakerFillRateMonitor
+from src.analytics.market_state_detector import MarketStateDetector
 from src.analytics.metrics import MetricsCollector
 from src.analytics.pnl_attribution import PnLAttribution
 from src.core.config import Config, load_config, load_yaml_config
@@ -154,7 +156,25 @@ class TradingEngine:
         self.pnl_attribution = PnLAttribution()
         self.metrics_collector = MetricsCollector()
 
-        # 5.5. 成交率监控（Week 1.5 新增）
+        # 5.5 市场状态检测器（Week 2 Phase 3）
+        self.market_state_detector = MarketStateDetector(
+            high_volatility_threshold=0.02,
+            low_liquidity_threshold=0.3,
+            min_liquidity_depth=Decimal("10.0"),
+        )
+
+        # 5.6 Alpha 健康检查器（Week 2 Phase 3）
+        self.alpha_health_checker = AlphaHealthChecker(
+            pnl_attribution=self.pnl_attribution,
+            metrics_collector=self.metrics_collector,
+            market_state_detector=self.market_state_detector,
+            healthy_ic_threshold=0.03,
+            degrading_ic_threshold=0.01,
+            healthy_alpha_threshold=70.0,
+            degrading_alpha_threshold=50.0,
+        )
+
+        # 5.7 成交率监控（Week 1.5 新增）
         self.fill_rate_monitor = MakerFillRateMonitor(
             window_size=100,  # 最近 100 次尝试
             alert_threshold_high=0.80,  # HIGH 置信度目标 80%
@@ -413,6 +433,10 @@ class TradingEngine:
             # 更新风控净值
             self.hard_limits.update_pnl(attribution.total_pnl)
 
+            # 9.5 更新连续亏损计数（Week 2 Phase 3）
+            is_loss = attribution.total_pnl < 0
+            self.alpha_health_checker.update_consecutive_losses(is_loss)
+
             # 10. 记录执行指标
             slippage_bps = self.slippage_estimator.calculate_actual_slippage(
                 order.price, market_data.mid_price, order.side
@@ -461,10 +485,52 @@ class TradingEngine:
 
         self._last_health_check = now
 
-        # 1. Alpha 健康检查
-        is_healthy, message = self.pnl_attribution.check_alpha_health()
-        if not is_healthy:
-            logger.warning("alpha_health_warning", message=message)
+        # 1. Alpha 健康检查（Week 2 Phase 3 增强版）
+        # 获取当前市场状态
+
+        # 从任意 symbol 获取最新市场数据作为市场状态参考
+        current_market_data = None
+        for symbol in self.symbols:
+            if symbol in self._latest_market_data:
+                current_market_data = self._latest_market_data[symbol]
+                break
+
+        # 执行健康检查
+        if current_market_data:
+            current_market_metrics = self.market_state_detector.detect_state(
+                current_market_data
+            )
+            health_metrics = self.alpha_health_checker.check_health(
+                current_market_metrics, int(now * 1000)
+            )
+
+            # 根据健康状态采取行动
+            if health_metrics.status == "FAILED":
+                logger.critical(
+                    "alpha_health_failed",
+                    ic=health_metrics.ic,
+                    ic_threshold=health_metrics.ic_threshold,
+                    alpha_pct=health_metrics.alpha_pct,
+                    alpha_threshold=health_metrics.alpha_threshold,
+                    consecutive_losses=health_metrics.consecutive_losses,
+                    reason=health_metrics.reason,
+                    action="stopping_trading",
+                )
+                self._running = False  # 停止交易
+                return
+            elif health_metrics.status == "DEGRADING":
+                logger.warning(
+                    "alpha_health_degrading",
+                    ic=health_metrics.ic,
+                    alpha_pct=health_metrics.alpha_pct,
+                    consecutive_losses=health_metrics.consecutive_losses,
+                    reason=health_metrics.reason,
+                )
+        else:
+            # 回退到简单检查
+            is_healthy, message = self.pnl_attribution.check_alpha_health()
+            if not is_healthy:
+                logger.warning("alpha_health_warning", message=message)
 
         # 2. 风控状态
         risk_status = self.hard_limits.get_status()
